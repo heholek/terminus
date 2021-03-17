@@ -114,6 +114,9 @@ export class AppRootComponent {
                 if (hotkey === 'move-tab-right') {
                     this.app.moveSelectedTabRight()
                 }
+                if (hotkey === 'reopen-tab') {
+                    this.app.reopenLastTab()
+                }
             }
             if (hotkey === 'toggle-fullscreen') {
                 this.hostApp.toggleFullscreen()
@@ -125,17 +128,8 @@ export class AppRootComponent {
             this.docking.dock()
         })
 
-        this.hostApp.secondInstance$.subscribe(() => {
-            this.presentWindow()
-        })
-        this.hotkeys.globalHotkey.subscribe(() => {
-            this.onGlobalHotkey()
-        })
-
         this.hostApp.windowCloseRequest$.subscribe(async () => {
-            if (await this.app.closeAllTabs()) {
-                this.hostApp.closeWindow()
-            }
+            this.app.closeWindow()
         })
 
         if (window['safeModeReason']) {
@@ -147,6 +141,8 @@ export class AppRootComponent {
         })
 
         this.touchbar.update()
+
+        this.hostApp.useBuiltinGraphics()
 
         config.changed$.subscribe(() => this.updateVibrancy())
         this.updateVibrancy()
@@ -174,41 +170,6 @@ export class AppRootComponent {
         })
     }
 
-    onGlobalHotkey () {
-        if (this.hostApp.getWindow().isFocused()) {
-            this.hideWindow()
-        } else {
-            this.presentWindow()
-        }
-    }
-
-    presentWindow () {
-        if (!this.hostApp.getWindow().isVisible()) {
-            // unfocused, invisible
-            this.hostApp.getWindow().show()
-            this.hostApp.getWindow().focus()
-        } else {
-            if (this.config.store.appearance.dock === 'off') {
-                // not docked, visible
-                setTimeout(() => {
-                    this.hostApp.getWindow().show()
-                    this.hostApp.getWindow().focus()
-                })
-            } else {
-                // docked, visible
-                this.hostApp.getWindow().hide()
-            }
-        }
-    }
-
-    hideWindow () {
-        this.electron.loseFocus()
-        this.hostApp.getWindow().blur()
-        if (this.hostApp.platform !== Platform.macOS) {
-            this.hostApp.getWindow().hide()
-        }
-    }
-
     async ngOnInit () {
         this.ready = true
 
@@ -223,6 +184,10 @@ export class AppRootComponent {
     @HostListener('drop')
     onDrop () {
         return false
+    }
+
+    hasVerticalTabs () {
+        return this.config.store.appearance.tabsLocation === 'left' || this.config.store.appearance.tabsLocation === 'right'
     }
 
     async updateApp () {
@@ -266,8 +231,8 @@ export class AppRootComponent {
             buttons = buttons.concat(provider.provide())
         })
         return buttons
-            .filter(button => (button.weight || 0) > 0 === aboveZero)
-            .sort((a: ToolbarButton, b: ToolbarButton) => (a.weight || 0) - (b.weight || 0))
+            .filter(button => (button.weight ?? 0) > 0 === aboveZero)
+            .sort((a: ToolbarButton, b: ToolbarButton) => (a.weight ?? 0) - (b.weight ?? 0))
     }
 
     private updateVibrancy () {

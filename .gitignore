@@ -13,6 +13,9 @@ dist
 *.xcuserstate
 *.wixpdb
 
+.DS_Store
+.DS_Store?
+
 coverage
 .nyc_output
 npm-debug.log
@@ -28,3 +31,5 @@ docs/api
 .electron-symbols
 sentry.properties
 sentry-symbols.js
+
+terminus-ssh/util/pagent.exe

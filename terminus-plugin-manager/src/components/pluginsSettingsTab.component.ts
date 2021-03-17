@@ -7,7 +7,9 @@ import { Component, Input } from '@angular/core'
 import { ConfigService, ElectronService } from 'terminus-core'
 import { PluginInfo, PluginManagerService } from '../services/pluginManager.service'
 
-enum BusyState { Installing, Uninstalling }
+enum BusyState { Installing = 'Installing', Uninstalling = 'Uninstalling' }
+
+const FORCE_ENABLE = ['terminus-core', 'terminus-settings']
 
 /** @hidden */
 @Component({
@@ -19,8 +21,8 @@ export class PluginsSettingsTabComponent {
     @Input() availablePlugins$: Observable<PluginInfo[]>
     @Input() availablePluginsQuery$ = new BehaviorSubject<string>('')
     @Input() availablePluginsReady = false
-    @Input() knownUpgrades: {[id: string]: PluginInfo|null} = {}
-    @Input() busy: {[id: string]: BusyState} = {}
+    @Input() knownUpgrades: Record<string, PluginInfo|null> = {}
+    @Input() busy = new Map<string, BusyState>()
     @Input() erroredPlugin: string
     @Input() errorMessage: string
 
@@ -55,7 +57,7 @@ export class PluginsSettingsTabComponent {
     }
 
     openPluginsFolder (): void {
-        this.electron.shell.openItem(this.pluginManager.userPluginsPath)
+        this.electron.shell.openPath(this.pluginManager.userPluginsPath)
     }
 
     searchAvailable (query: string) {
@@ -67,29 +69,29 @@ export class PluginsSettingsTabComponent {
     }
 
     async installPlugin (plugin: PluginInfo): Promise<void> {
-        this.busy[plugin.name] = BusyState.Installing
+        this.busy.set(plugin.name, BusyState.Installing)
         try {
             await this.pluginManager.installPlugin(plugin)
-            delete this.busy[plugin.name]
+            this.busy.delete(plugin.name)
             this.config.requestRestart()
         } catch (err) {
             this.erroredPlugin = plugin.name
             this.errorMessage = err
-            delete this.busy[plugin.name]
+            this.busy.delete(plugin.name)
             throw err
         }
     }
 
     async uninstallPlugin (plugin: PluginInfo): Promise<void> {
-        this.busy[plugin.name] = BusyState.Uninstalling
+        this.busy.set(plugin.name, BusyState.Uninstalling)
         try {
             await this.pluginManager.uninstallPlugin(plugin)
-            delete this.busy[plugin.name]
+            this.busy.delete(plugin.name)
             this.config.requestRestart()
         } catch (err) {
             this.erroredPlugin = plugin.name
             this.errorMessage = err
-            delete this.busy[plugin.name]
+            this.busy.delete(plugin.name)
             throw err
         }
     }
@@ -100,6 +102,22 @@ export class PluginsSettingsTabComponent {
 
     showPluginInfo (plugin: PluginInfo) {
         this.electron.shell.openExternal('https://www.npmjs.com/package/' + plugin.packageName)
+    }
+
+    isPluginEnabled (plugin: PluginInfo) {
+        return !this.config.store.pluginBlacklist.includes(plugin.name)
+    }
+
+    canDisablePlugin (plugin: PluginInfo) {
+        return !FORCE_ENABLE.includes(plugin.packageName)
+    }
+
+    togglePlugin (plugin: PluginInfo) {
+        if (this.isPluginEnabled(plugin)) {
+            this.disablePlugin(plugin)
+        } else {
+            this.enablePlugin(plugin)
+        }
     }
 
     enablePlugin (plugin: PluginInfo) {

@@ -11,21 +11,23 @@ import { Subscription } from 'rxjs'
 /** @hidden */
 @Component({
     selector: 'serial-tab',
-    template: BaseTerminalTabComponent.template + require<string>('./serialTab.component.pug'),
+    template: `${BaseTerminalTabComponent.template} ${require('./serialTab.component.pug')}`,
     styles: [require('./serialTab.component.scss'), ...BaseTerminalTabComponent.styles],
     animations: BaseTerminalTabComponent.animations,
 })
 export class SerialTabComponent extends BaseTerminalTabComponent {
-    connection: SerialConnection
-    session: SerialSession
+    connection?: SerialConnection
+    session: SerialSession|null = null
     serialPort: any
+    private serialService: SerialService
     private homeEndSubscription: Subscription
 
+    // eslint-disable-next-line @typescript-eslint/no-useless-constructor
     constructor (
         injector: Injector,
-        private serial: SerialService,
     ) {
         super(injector)
+        this.serialService = injector.get(SerialService)
     }
 
     ngOnInit () {
@@ -42,6 +44,9 @@ export class SerialTabComponent extends BaseTerminalTabComponent {
                 case 'end':
                     this.sendInput('\x1b[F' )
                     break
+                case 'restart-serial-session':
+                    this.reconnect()
+                    break
             }
         })
 
@@ -52,7 +57,7 @@ export class SerialTabComponent extends BaseTerminalTabComponent {
         super.ngOnInit()
 
         setImmediate(() => {
-            this.setTitle(this.connection.name)
+            this.setTitle(this.connection!.name)
         })
     }
 
@@ -62,12 +67,8 @@ export class SerialTabComponent extends BaseTerminalTabComponent {
             return
         }
 
-        this.session = this.serial.createSession(this.connection)
-        this.session.serviceMessage$.subscribe(msg => {
-            this.write('\r\n' + colors.black.bgWhite(' serial ') + ' ' + msg + '\r\n')
-            this.session.resize(this.size.columns, this.size.rows)
-        })
-        this.attachSessionHandlers()
+        const session = this.serialService.createSession(this.connection)
+        this.setSession(session)
         this.write(`Connecting to `)
 
         const spinner = new Spinner({
@@ -80,19 +81,32 @@ export class SerialTabComponent extends BaseTerminalTabComponent {
         spinner.start()
 
         try {
-            this.serialPort = await this.serial.connectSession(this.session, (message: string) => {
-                spinner.stop(true)
-                this.write(message + '\r\n')
-                spinner.start()
-            })
+            this.serialPort = await this.serialService.connectSession(this.session!)
             spinner.stop(true)
+            session.emitServiceMessage('Port opened')
         } catch (e) {
             spinner.stop(true)
             this.write(colors.black.bgRed(' X ') + ' ' + colors.red(e.message) + '\r\n')
             return
         }
-        await this.session.start()
-        this.session.resize(this.size.columns, this.size.rows)
+        await this.session!.start()
+        this.session!.resize(this.size.columns, this.size.rows)
+    }
+
+    protected attachSessionHandlers () {
+        this.attachSessionHandler(this.session!.serviceMessage$.subscribe(msg => {
+            this.write(`\r\n${colors.black.bgWhite(' Serial ')} ${msg}\r\n`)
+            this.session?.resize(this.size.columns, this.size.rows)
+        }))
+        this.attachSessionHandler(this.session!.destroyed$.subscribe(() => {
+            this.write('Press any key to reconnect\r\n')
+            this.input$.pipe(first()).subscribe(() => {
+                if (!this.session?.open) {
+                    this.reconnect()
+                }
+            })
+        }))
+        super.attachSessionHandlers()
     }
 
     async getRecoveryToken (): Promise<any> {
@@ -103,8 +117,10 @@ export class SerialTabComponent extends BaseTerminalTabComponent {
         }
     }
 
-    reconnect () {
-        this.initializeSession()
+    async reconnect (): Promise<void> {
+        this.session?.destroy()
+        await this.initializeSession()
+        this.session?.releaseInitialDataBuffer()
     }
 
     async changeBaudRate () {
@@ -112,7 +128,7 @@ export class SerialTabComponent extends BaseTerminalTabComponent {
             name: x.toString(), result: x,
         })))
         this.serialPort.update({ baudRate: rate })
-        this.connection.baudrate = rate
+        this.connection!.baudrate = rate
     }
 
     ngOnDestroy () {

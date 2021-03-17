@@ -2,8 +2,9 @@ import { Injectable, Inject, NgZone, EventEmitter } from '@angular/core'
 import { Observable, Subject } from 'rxjs'
 import { HotkeyDescription, HotkeyProvider } from '../api/hotkeyProvider'
 import { stringifyKeySequence } from './hotkeys.util'
-import { ConfigService } from '../services/config.service'
-import { ElectronService } from '../services/electron.service'
+import { ConfigService } from './config.service'
+import { ElectronService } from './electron.service'
+import { HostAppService } from './hostApp.service'
 
 export interface PartialHotkeyMatch {
     id: string
@@ -30,7 +31,6 @@ export class HotkeysService {
      */
     get hotkey$ (): Observable<string> { return this._hotkey }
 
-    globalHotkey = new EventEmitter<void>()
     private _hotkey = new Subject<string>()
     private currentKeystrokes: EventBufferEntry[] = []
     private disabledLevel = 0
@@ -38,6 +38,7 @@ export class HotkeysService {
 
     private constructor (
         private zone: NgZone,
+        private hostApp: HostAppService,
         private electron: ElectronService,
         private config: ConfigService,
         @Inject(HotkeyProvider) private hotkeyProviders: HotkeyProvider[],
@@ -171,7 +172,7 @@ export class HotkeysService {
         return (
             await Promise.all(
                 this.config.enabledServices(this.hotkeyProviders)
-                    .map(async x => x.provide ? x.provide() : x.hotkeys)
+                    .map(async x => x.provide())
             )
         ).reduce((a, b) => a.concat(b))
     }
@@ -182,21 +183,23 @@ export class HotkeysService {
         if (typeof value === 'string') {
             value = [value]
         }
+        const specs: string[] = []
         value.forEach((item: string | string[]) => {
             item = typeof item === 'string' ? [item] : item
 
             try {
                 let electronKeySpec = item[0]
+                electronKeySpec = electronKeySpec.replace('Meta', 'Super')
                 electronKeySpec = electronKeySpec.replace('⌘', 'Command')
                 electronKeySpec = electronKeySpec.replace('⌥', 'Alt')
                 electronKeySpec = electronKeySpec.replace(/-/g, '+')
-                this.electron.globalShortcut.register(electronKeySpec, () => {
-                    this.globalHotkey.emit()
-                })
+                specs.push(electronKeySpec)
             } catch (err) {
                 console.error('Could not register the global hotkey:', err)
             }
         })
+
+        this.hostApp.registerGlobalHotkey(specs)
     }
 
     private getHotkeysConfig () {
@@ -219,7 +222,7 @@ export class HotkeysService {
                 if (!(value instanceof Array)) {
                     continue
                 }
-                if (value) {
+                if (value.length > 0) {
                     value = value.map((item: string | string[]) => typeof item === 'string' ? [item] : item)
                     keys[key] = value
                 }

@@ -1,13 +1,12 @@
 import * as psNode from 'ps-node'
 import * as fs from 'mz/fs'
 import * as os from 'os'
-import * as nodePTY from 'node-pty'
-
+import * as nodePTY from '@terminus-term/node-pty'
+import { getWorkingDirectoryFromPID } from 'native-process-working-directory'
 import { Observable, Subject } from 'rxjs'
 import { first } from 'rxjs/operators'
 import { Injectable } from '@angular/core'
 import { Logger, LogService, ConfigService, WIN_BUILD_CONPTY_SUPPORTED, isWindowsBuild } from 'terminus-core'
-import { exec } from 'mz/child_process'
 import { SessionOptions } from '../api/interfaces'
 
 /* eslint-disable block-scoped-var */
@@ -20,7 +19,6 @@ try {
     var windowsProcessTree = require('windows-process-tree')  // eslint-disable-line @typescript-eslint/no-var-requires, no-var
 } catch { }
 
-
 export interface ChildProcess {
     pid: number
     ppid: number
@@ -28,7 +26,6 @@ export interface ChildProcess {
 }
 
 const windowsDirectoryRegex = /([a-zA-Z]:[^\:\[\]\?\"\<\>\|]+)/mi
-const catalinaDataVolumePrefix = '/System/Volumes/Data'
 const OSC1337Prefix = Buffer.from('\x1b]1337;')
 const OSC1337Suffix = Buffer.from('\x07')
 
@@ -73,6 +70,8 @@ export abstract class BaseSession {
             this.open = false
             this.closed.next()
             this.destroyed.next()
+            this.closed.complete()
+            this.destroyed.complete()
             this.output.complete()
             this.binaryOutput.complete()
             await this.gracefullyKillProcess()
@@ -85,6 +84,7 @@ export abstract class BaseSession {
     abstract kill (signal?: string): void
     abstract async getChildProcesses (): Promise<ChildProcess[]>
     abstract async gracefullyKillProcess (): Promise<void>
+    abstract supportsWorkingDirectory (): boolean
     abstract async getWorkingDirectory (): Promise<string|null>
 }
 
@@ -94,13 +94,14 @@ export class Session extends BaseSession {
     private pauseAfterExit = false
     private guessedCWD: string|null = null
     private reportedCWD: string
+    private initialCWD: string|null = null
 
     constructor (private config: ConfigService) {
         super()
     }
 
     start (options: SessionOptions): void {
-        this.name = options.name || ''
+        this.name = options.name ?? ''
 
         const env = {
             ...process.env,
@@ -111,7 +112,7 @@ export class Session extends BaseSession {
         }
 
         if (process.platform === 'darwin' && !process.env.LC_ALL) {
-            const locale = process.env.LC_CTYPE || 'en_US.UTF-8'
+            const locale = process.env.LC_CTYPE ?? 'en_US.UTF-8'
             Object.assign(env, {
                 LANG: locale,
                 LC_ALL: locale,
@@ -122,17 +123,17 @@ export class Session extends BaseSession {
             })
         }
 
-        let cwd = options.cwd || process.env.HOME
+        let cwd = options.cwd ?? process.env.HOME
 
         if (!fs.existsSync(cwd)) {
             console.warn('Ignoring non-existent CWD:', cwd)
             cwd = undefined
         }
 
-        this.pty = nodePTY.spawn(options.command, options.args || [], {
+        this.pty = nodePTY.spawn(options.command, options.args ?? [], {
             name: 'xterm-256color',
-            cols: options.width || 80,
-            rows: options.height || 30,
+            cols: options.width ?? 80,
+            rows: options.height ?? 30,
             encoding: null,
             cwd,
             env: env,
@@ -140,7 +141,7 @@ export class Session extends BaseSession {
             useConpty: (isWindowsBuild(WIN_BUILD_CONPTY_SUPPORTED) && this.config.store.terminal.useConPTY ? 1 : false) as any,
         })
 
-        this.guessedCWD = cwd || null
+        this.guessedCWD = cwd ?? null
 
         this.truePID = this.pty['pid']
 
@@ -151,6 +152,7 @@ export class Session extends BaseSession {
                 this.truePID = processes[0].pid
                 processes = await this.getChildProcesses()
             }
+            this.initialCWD = await this.getWorkingDirectory()
         }, 2000)
 
         this.open = true
@@ -179,7 +181,7 @@ export class Session extends BaseSession {
             }
         })
 
-        this.pauseAfterExit = options.pauseAfterExit || false
+        this.pauseAfterExit = options.pauseAfterExit ?? false
     }
 
     resize (columns: number, rows: number): void {
@@ -257,6 +259,10 @@ export class Session extends BaseSession {
         }
     }
 
+    supportsWorkingDirectory (): boolean {
+        return !!(this.truePID || this.reportedCWD || this.guessedCWD)
+    }
+
     async getWorkingDirectory (): Promise<string|null> {
         if (this.reportedCWD) {
             return this.reportedCWD
@@ -264,39 +270,31 @@ export class Session extends BaseSession {
         if (!this.truePID) {
             return null
         }
-        if (process.platform === 'darwin') {
-            let lines: string[]
-            try {
-                lines = (await exec(`lsof -p ${this.truePID} -Fn`))[0].toString().split('\n')
-            } catch (e) {
-                return null
-            }
-            let cwd = lines[lines[1] === 'fcwd' ? 2 : 1].substring(1)
-            if (cwd.startsWith(catalinaDataVolumePrefix)) {
-                cwd = cwd.substring(catalinaDataVolumePrefix.length)
-            }
-            return cwd
+        let cwd: string|null = null
+        try {
+            cwd = getWorkingDirectoryFromPID(this.truePID)
+        } catch (exc) {
+            console.error(exc)
         }
-        if (process.platform === 'linux') {
-            try {
-                return fs.readlink(`/proc/${this.truePID}/cwd`)
-            } catch (exc) {
-                console.error(exc)
-                return null
-            }
+
+        try {
+            cwd = await fs.realpath(cwd)
+        } catch {}
+
+        if (process.platform === 'win32' && (cwd === this.initialCWD || cwd === process.env.WINDIR)) {
+            // shell doesn't truly change its process' CWD
+            cwd = null
         }
-        if (process.platform === 'win32') {
-            if (!this.guessedCWD) {
-                return null
-            }
-            try {
-                await fs.access(this.guessedCWD)
-            } catch (e) {
-                return null
-            }
-            return this.guessedCWD
+
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+        cwd = cwd || this.guessedCWD
+
+        try {
+            await fs.access(cwd)
+        } catch {
+            return null
         }
-        return null
+        return cwd
     }
 
     private guessWindowsCWD (data: string) {
@@ -309,7 +307,7 @@ export class Session extends BaseSession {
     private processOSC1337 (data: Buffer) {
         if (data.includes(OSC1337Prefix)) {
             const preData = data.subarray(0, data.indexOf(OSC1337Prefix))
-            let params = data.subarray(data.indexOf(OSC1337Prefix) + OSC1337Prefix.length)
+            const params = data.subarray(data.indexOf(OSC1337Prefix) + OSC1337Prefix.length)
             const postData = params.subarray(params.indexOf(OSC1337Suffix) + OSC1337Suffix.length)
             const paramString = params.subarray(0, params.indexOf(OSC1337Suffix)).toString()
 
@@ -328,11 +326,11 @@ export class Session extends BaseSession {
 /** @hidden */
 @Injectable({ providedIn: 'root' })
 export class SessionsService {
-    sessions: {[id: string]: BaseSession} = {}
+    sessions = new Map<string, BaseSession>()
     logger: Logger
     private lastID = 0
 
-    constructor (
+    private constructor (
         log: LogService,
     ) {
         require('../bufferizedPTY')(nodePTY) // eslint-disable-line @typescript-eslint/no-var-requires
@@ -344,9 +342,9 @@ export class SessionsService {
         options.name = `session-${this.lastID}`
         session.start(options)
         session.destroyed$.pipe(first()).subscribe(() => {
-            delete this.sessions[session.name]
+            this.sessions.delete(session.name)
         })
-        this.sessions[session.name] = session
+        this.sessions.set(session.name, session)
         return session
     }
 }

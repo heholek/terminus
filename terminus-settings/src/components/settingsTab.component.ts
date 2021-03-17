@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/explicit-module-boundary-types */
 import * as yaml from 'js-yaml'
+import { debounce } from 'utils-decorators/dist/cjs'
 import { Subscription } from 'rxjs'
 import { Component, Inject, Input, HostBinding, NgZone } from '@angular/core'
 import {
@@ -60,24 +61,20 @@ export class SettingsTabComponent extends BaseTabComponent {
         this.settingsProviders = config.enabledServices(this.settingsProviders)
         this.themes = config.enabledServices(this.themes)
 
-        this.configDefaults = yaml.safeDump(config.getDefaults())
+        this.configDefaults = yaml.dump(config.getDefaults())
 
         const onConfigChange = () => {
             this.configFile = config.readRaw()
             this.padWindowControls = hostApp.platform === Platform.macOS
-                && config.store.appearance.tabsLocation === 'bottom'
+                && config.store.appearance.tabsLocation !== 'top'
         }
 
         this.configSubscription = config.changed$.subscribe(onConfigChange)
         onConfigChange()
 
-        const onScreenChange = () => {
+        hostApp.displaysChanged$.subscribe(() => {
             this.zone.run(() => this.screens = this.docking.getScreens())
-        }
-
-        electron.screen.on('display-added', onScreenChange)
-        electron.screen.on('display-removed', onScreenChange)
-        electron.screen.on('display-metrics-changed', onScreenChange)
+        })
 
         hotkeys.getHotkeyDescriptions().then(descriptions => {
             this.hotkeyDescriptions = descriptions
@@ -108,6 +105,14 @@ export class SettingsTabComponent extends BaseTabComponent {
         this.hostApp.relaunch()
     }
 
+    @debounce(500)
+    saveConfiguration (requireRestart?: boolean) {
+        this.config.save()
+        if (requireRestart) {
+            this.config.requestRestart()
+        }
+    }
+
     saveConfigFile () {
         if (this.isConfigFileValid()) {
             this.config.writeRaw(this.configFile)
@@ -120,7 +125,7 @@ export class SettingsTabComponent extends BaseTabComponent {
 
     isConfigFileValid () {
         try {
-            yaml.safeLoad(this.configFile)
+            yaml.load(this.configFile)
             return true
         } catch (_) {
             return false
@@ -143,5 +148,11 @@ export class SettingsTabComponent extends BaseTabComponent {
             prop = token
         }
         ptr[prop] = value
+    }
+
+    hotkeyFilterFn (hotkey: HotkeyDescription, query: string): boolean {
+        // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
+        const s = hotkey.name + (this.getHotkey(hotkey.id) || []).toString()
+        return s.toLowerCase().includes(query.toLowerCase())
     }
 }

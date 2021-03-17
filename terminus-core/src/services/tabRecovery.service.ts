@@ -8,9 +8,10 @@ import { ConfigService } from '../services/config.service'
 @Injectable({ providedIn: 'root' })
 export class TabRecoveryService {
     logger: Logger
+    enabled = false
 
-    constructor (
-        @Inject(TabRecoveryProvider) private tabRecoveryProviders: TabRecoveryProvider[],
+    private constructor (
+        @Inject(TabRecoveryProvider) private tabRecoveryProviders: TabRecoveryProvider[]|null,
         private config: ConfigService,
         log: LogService
     ) {
@@ -18,33 +19,35 @@ export class TabRecoveryService {
     }
 
     async saveTabs (tabs: BaseTabComponent[]): Promise<void> {
+        if (!this.enabled) {
+            return
+        }
         window.localStorage.tabsRecovery = JSON.stringify(
-            await Promise.all(
-                tabs
-                    .map(tab => {
-                        let token = tab.getRecoveryToken()
-                        if (token) {
-                            token = token.then(r => {
-                                if (r && tab.color) {
-                                    r.tabColor = tab.color
-                                }
-                                return r
-                            })
-                        }
-                        return token
-                    })
-                    .filter(token => !!token)
-            )
+            (await Promise.all(
+                tabs.map(async tab => this.getFullRecoveryToken(tab))
+            )).filter(token => !!token)
         )
     }
 
+    async getFullRecoveryToken (tab: BaseTabComponent): Promise<RecoveryToken|null> {
+        const token = await tab.getRecoveryToken()
+        if (token) {
+            token.tabTitle = tab.title
+            if (tab.color) {
+                token.tabColor = tab.color
+            }
+        }
+        return token
+    }
+
     async recoverTab (token: RecoveryToken): Promise<RecoveredTab|null> {
-        for (const provider of this.config.enabledServices(this.tabRecoveryProviders)) {
+        for (const provider of this.config.enabledServices(this.tabRecoveryProviders ?? [])) {
             try {
                 const tab = await provider.recover(token)
                 if (tab !== null) {
                     tab.options = tab.options || {}
-                    tab.options.color = token.tabColor || null
+                    tab.options.color = token.tabColor ?? null
+                    tab.options.title = token.tabTitle || ''
                     return tab
                 }
             } catch (error) {

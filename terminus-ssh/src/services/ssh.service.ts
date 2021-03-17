@@ -1,22 +1,31 @@
 import colors from 'ansi-colors'
+import stripAnsi from 'strip-ansi'
 import { open as openTemp } from 'temp'
 import { Injectable, NgZone } from '@angular/core'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
 import { Client } from 'ssh2'
+import { SSH2Stream } from 'ssh2-streams'
 import * as fs from 'mz/fs'
 import { execFile } from 'mz/child_process'
 import * as path from 'path'
 import * as sshpk from 'sshpk'
-import { ToastrService } from 'ngx-toastr'
-import { HostAppService, Platform, Logger, LogService, ElectronService } from 'terminus-core'
-import { SSHConnection, SSHSession } from '../api'
+import { HostAppService, Platform, Logger, LogService, ElectronService, AppService, SelectorOption, ConfigService, NotificationsService } from 'terminus-core'
+import { SettingsTabComponent } from 'terminus-settings'
+import { ALGORITHM_BLACKLIST, SSHConnection, SSHSession } from '../api'
 import { PromptModalComponent } from '../components/promptModal.component'
 import { PasswordStorageService } from './passwordStorage.service'
-import { SSH2Stream } from 'ssh2-streams'
+import { SSHTabComponent } from '../components/sshTab.component'
+
+const WINDOWS_OPENSSH_AGENT_PIPE = '\\\\.\\pipe\\openssh-ssh-agent'
 
 try {
     var windowsProcessTreeNative = require('windows-process-tree/build/Release/windows_process_tree.node') // eslint-disable-line @typescript-eslint/no-var-requires, no-var
 } catch { }
+
+
+// eslint-disable-next-line @typescript-eslint/no-type-alias
+export type SSHLogCallback = (message: string) => void
+
 
 @Injectable({ providedIn: 'root' })
 export class SSHService {
@@ -29,7 +38,9 @@ export class SSHService {
         private ngbModal: NgbModal,
         private hostApp: HostAppService,
         private passwordStorage: PasswordStorageService,
-        private toastr: ToastrService,
+        private notifications: NotificationsService,
+        private app: AppService,
+        private config: ConfigService,
     ) {
         this.logger = log.create('ssh')
     }
@@ -40,34 +51,25 @@ export class SSHService {
         return session
     }
 
-    async connectSession (session: SSHSession, logCallback?: (s: any) => void): Promise<void> {
+    async loadPrivateKeyForSession (session: SSHSession, logCallback?: SSHLogCallback): Promise<string|null> {
         let privateKey: string|null = null
         let privateKeyPath = session.connection.privateKey
 
-        if (!logCallback) {
-            logCallback = () => null
-        }
-
-        const log = (s: any) => {
-            logCallback!(s)
-            this.logger.info(s)
-        }
-
         if (!privateKeyPath) {
-            const userKeyPath = path.join(process.env.HOME as string, '.ssh', 'id_rsa')
+            const userKeyPath = path.join(process.env.HOME!, '.ssh', 'id_rsa')
             if (await fs.exists(userKeyPath)) {
-                log('Using user\'s default private key')
+                logCallback?.('Using user\'s default private key')
                 privateKeyPath = userKeyPath
             }
         }
 
         if (privateKeyPath) {
-            log('Loading private key from ' + colors.bgWhite.blackBright(' ' + privateKeyPath + ' '))
+            logCallback?.('Loading private key from ' + colors.bgWhite.blackBright(' ' + privateKeyPath + ' '))
             try {
                 privateKey = (await fs.readFile(privateKeyPath)).toString()
             } catch (error) {
-                log(colors.bgRed.black(' X ') + 'Could not read the private key file')
-                this.toastr.error('Could not read the private key file')
+                logCallback?.(colors.bgRed.black(' X ') + 'Could not read the private key file')
+                this.notifications.error('Could not read the private key file')
             }
 
             if (privateKey) {
@@ -77,14 +79,14 @@ export class SSHService {
                 } catch (e) {
                     if (e instanceof sshpk.KeyEncryptedError) {
                         const modal = this.ngbModal.open(PromptModalComponent)
-                        log(colors.bgYellow.yellow.black(' ! ') + ' Key requires passphrase')
+                        logCallback?.(colors.bgYellow.yellow.black(' ! ') + ' Key requires passphrase')
                         modal.componentInstance.prompt = 'Private key passphrase'
                         modal.componentInstance.password = true
                         let passphrase = ''
                         try {
                             const result  = await modal.result
                             passphrase = result?.value
-                        } catch (e) { }
+                        } catch { }
                         parsedKey = sshpk.parsePrivateKey(
                             privateKey,
                             'auto',
@@ -95,7 +97,7 @@ export class SSHService {
                     }
                 }
 
-                const sshFormatKey = parsedKey!.toString('openssh')
+                const sshFormatKey = parsedKey.toString('openssh')
                 const temp = await openTemp()
                 fs.close(temp.fd)
                 await fs.writeFile(temp.path, sshFormatKey)
@@ -109,6 +111,11 @@ export class SSHService {
                         'ssh-keygen',
                         'ssh-keygen.exe',
                     )
+                    await execFile('icacls', [temp.path, '/inheritance:r'])
+                    let sid = await execFile('whoami', ['/user', '/nh', '/fo', 'csv'])
+                    sid = sid[0].split(',')[0]
+                    sid = sid.substring(1, sid.length - 1)
+                    await execFile('icacls', [temp.path, '/grant:r', `${sid}:(R,W)`])
                 }
 
                 await execFile(sshKeygenPath, [
@@ -120,11 +127,29 @@ export class SSHService {
                 fs.unlink(temp.path)
             }
         }
+        return privateKey
+    }
+
+    async connectSession (session: SSHSession, logCallback?: SSHLogCallback): Promise<void> {
+        if (!logCallback) {
+            logCallback = () => null
+        }
+
+        const log = (s: any) => {
+            logCallback!(s)
+            this.logger.info(stripAnsi(s))
+        }
+
+        let privateKey: string|null = null
 
         const ssh = new Client()
         session.ssh = ssh
         let connected = false
         let savedPassword: string|null = null
+        const algorithms = {}
+        for (const key of Object.keys(session.connection.algorithms ?? {})) {
+            algorithms[key] = session.connection.algorithms![key].filter(x => !ALGORITHM_BLACKLIST.includes(x))
+        }
         await new Promise(async (resolve, reject) => {
             ssh.on('ready', () => {
                 connected = true
@@ -139,12 +164,19 @@ export class SSHService {
                 }
                 this.zone.run(() => {
                     if (connected) {
-                        this.toastr.error(error.toString())
+                        // eslint-disable-next-line @typescript-eslint/no-base-to-string
+                        this.notifications.error(error.toString())
                     } else {
                         reject(error)
                     }
                 })
             })
+            ssh.on('close', () => {
+                if (session.open) {
+                    session.destroy()
+                }
+            })
+
             ssh.on('keyboard-interactive', (name, instructions, instructionsLang, prompts, finish) => this.zone.run(async () => {
                 log(colors.bgBlackBright(' ') + ` Keyboard-interactive auth requested: ${name}`)
                 this.logger.info('Keyboard-interactive auth:', name, instructions, instructionsLang)
@@ -153,8 +185,13 @@ export class SSHService {
                     const modal = this.ngbModal.open(PromptModalComponent)
                     modal.componentInstance.prompt = prompt.prompt
                     modal.componentInstance.password = !prompt.echo
-                    const result = await modal.result
-                    results.push(result ? result.value : '')
+
+                    try {
+                        const result = await modal.result
+                        results.push(result ? result.value : '')
+                    } catch {
+                        results.push('')
+                    }
                 }
                 finish(results)
             }))
@@ -173,42 +210,86 @@ export class SSHService {
 
             let agent: string|null = null
             if (this.hostApp.platform === Platform.Windows) {
-                const pageantRunning = new Promise<boolean>(resolve => {
-                    windowsProcessTreeNative.getProcessList(list => { // eslint-disable-line block-scoped-var
-                        resolve(list.some(x => x.name === 'pageant.exe'))
-                    }, 0)
-                })
-                if (await pageantRunning) {
-                    agent = 'pageant'
+                if (await fs.exists(WINDOWS_OPENSSH_AGENT_PIPE)) {
+                    agent = WINDOWS_OPENSSH_AGENT_PIPE
+                } else {
+                    // eslint-disable-next-line @typescript-eslint/no-shadow
+                    const pageantRunning = await new Promise<boolean>(resolve => {
+                        windowsProcessTreeNative.getProcessList(list => { // eslint-disable-line block-scoped-var
+                            resolve(list.some(x => x.name === 'pageant.exe'))
+                        }, 0)
+                    })
+                    if (pageantRunning) {
+                        agent = 'pageant'
+                    }
                 }
             } else {
-                agent = process.env.SSH_AUTH_SOCK as string
+                agent = process.env.SSH_AUTH_SOCK!
             }
+
+            const authMethodsLeft = ['none']
+            if (!session.connection.auth || session.connection.auth === 'publicKey') {
+                privateKey = await this.loadPrivateKeyForSession(session, log)
+                if (!privateKey) {
+                    log('\r\nPrivate key auth selected, but no key is loaded\r\n')
+                } else {
+                    authMethodsLeft.push('publickey')
+                }
+            }
+            if (!session.connection.auth || session.connection.auth === 'agent') {
+                if (!agent) {
+                    log('\r\nAgent auth selected, but no running agent is detected\r\n')
+                } else {
+                    authMethodsLeft.push('agent')
+                }
+            }
+            if (!session.connection.auth || session.connection.auth === 'password') {
+                authMethodsLeft.push('password')
+            }
+            if (!session.connection.auth || session.connection.auth === 'keyboardInteractive') {
+                authMethodsLeft.push('keyboard-interactive')
+            }
+            authMethodsLeft.push('hostbased')
 
             try {
                 ssh.connect({
                     host: session.connection.host,
-                    port: session.connection.port || 22,
+                    port: session.connection.port ?? 22,
                     username: session.connection.user,
                     password: session.connection.privateKey ? undefined : '',
-                    privateKey: privateKey || undefined,
+                    privateKey: privateKey ?? undefined,
                     tryKeyboard: true,
-                    agent: agent || undefined,
-                    agentForward: !!agent,
-                    keepaliveInterval: session.connection.keepaliveInterval,
+                    agent: agent ?? undefined,
+                    agentForward: session.connection.agentForward && !!agent,
+                    keepaliveInterval: session.connection.keepaliveInterval ?? 15000,
                     keepaliveCountMax: session.connection.keepaliveCountMax,
                     readyTimeout: session.connection.readyTimeout,
-                    hostVerifier: digest => {
+                    hostVerifier: (digest: string) => {
                         log(colors.bgWhite(' ') + ' Host key fingerprint:')
                         log(colors.bgWhite(' ') + ' ' + colors.black.bgWhite(' SHA256 ') + colors.bgBlackBright(' ' + digest + ' '))
                         return true
                     },
                     hostHash: 'sha256' as any,
-                    algorithms: session.connection.algorithms,
-                })
+                    algorithms,
+                    sock: session.jumpStream,
+                    authHandler: methodsLeft => {
+                        while (true) {
+                            const method = authMethodsLeft.shift()
+                            if (!method) {
+                                return false
+                            }
+                            if (methodsLeft && !methodsLeft.includes(method) && method !== 'agent') {
+                                // Agent can still be used even if not in methodsLeft
+                                this.logger.info('Server does not support auth method', method)
+                                continue
+                            }
+                            return method
+                        }
+                    },
+                } as any)
             } catch (e) {
-                this.toastr.error(e.message)
-                reject(e)
+                this.notifications.error(e.message)
+                return reject(e)
             }
 
             let keychainPasswordUsed = false
@@ -246,6 +327,124 @@ export class SSHService {
                 }
             })
         })
+    }
+
+    async showConnectionSelector (): Promise<void> {
+        const options: SelectorOption<void>[] = []
+        const recentConnections = this.config.store.ssh.recentConnections
+
+        for (const connection of recentConnections) {
+            options.push({
+                name: connection.name,
+                description: connection.host,
+                icon: 'history',
+                callback: () => this.connect(connection),
+            })
+        }
+
+        if (recentConnections.length) {
+            options.push({
+                name: 'Clear recent connections',
+                icon: 'eraser',
+                callback: () => {
+                    this.config.store.ssh.recentConnections = []
+                    this.config.save()
+                },
+            })
+        }
+
+        const groups: { name: string, connections: SSHConnection[] }[] = []
+        const connections = this.config.store.ssh.connections
+        for (const connection of connections) {
+            connection.group = connection.group || null
+            let group = groups.find(x => x.name === connection.group)
+            if (!group) {
+                group = {
+                    name: connection.group!,
+                    connections: [],
+                }
+                groups.push(group)
+            }
+            group.connections.push(connection)
+        }
+
+        for (const group of groups) {
+            for (const connection of group.connections) {
+                options.push({
+                    name: (group.name ? `${group.name} / ` : '') + connection.name,
+                    description: connection.host,
+                    icon: 'desktop',
+                    callback: () => this.connect(connection),
+                })
+            }
+        }
+
+        options.push({
+            name: 'Manage connections',
+            icon: 'cog',
+            callback: () => this.app.openNewTabRaw(SettingsTabComponent, { activeTab: 'ssh' }),
+        })
+
+        options.push({
+            name: 'Quick connect',
+            freeInputPattern: 'Connect to "%s"...',
+            icon: 'arrow-right',
+            callback: query => this.quickConnect(query),
+        })
+
+
+        await this.app.showSelector('Open an SSH connection', options)
+    }
+
+    async connect (connection: SSHConnection): Promise<SSHTabComponent> {
+        try {
+            const tab = this.app.openNewTab(
+                SSHTabComponent,
+                { connection }
+            ) as SSHTabComponent
+            if (connection.color) {
+                (this.app.getParentTab(tab) ?? tab).color = connection.color
+            }
+
+            setTimeout(() => this.app.activeTab?.emitFocused())
+
+            return tab
+        } catch (error) {
+            this.notifications.error(`Could not connect: ${error}`)
+            throw error
+        }
+    }
+
+    quickConnect (query: string): Promise<SSHTabComponent> {
+        let user = 'root'
+        let host = query
+        let port = 22
+        if (host.includes('@')) {
+            const parts = host.split(/@/g)
+            host = parts[parts.length - 1]
+            user = parts.slice(0, parts.length - 1).join('@')
+        }
+        if (host.includes(':')) {
+            port = parseInt(host.split(':')[1])
+            host = host.split(':')[0]
+        }
+
+        const connection: SSHConnection = {
+            name: query,
+            group: null,
+            host,
+            user,
+            port,
+        }
+
+        const recentConnections = this.config.store.ssh.recentConnections
+        recentConnections.unshift(connection)
+        if (recentConnections.length > 5) {
+            recentConnections.pop()
+        }
+        this.config.store.ssh.recentConnections = recentConnections
+        this.config.save()
+        return this.connect(connection)
     }
 }
 
