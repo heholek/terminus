@@ -35,10 +35,11 @@
     "node-abi": "^2.19.3",
     "node-gyp": "^7.1.2",
     "node-sass": "^5.0.0",
-    "npmlog": "4.1.2",
+
     "npx": "^10.2.2",
     "patch-package": "^6.2.2",
     "pug": "^3.0.2",
+
     "pug-html-loader": "1.1.5",
     "pug-lint": "^2.6.0",
     "pug-loader": "^2.4.0",
