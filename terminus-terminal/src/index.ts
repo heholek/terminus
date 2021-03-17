@@ -1,5 +1,4 @@
 import * as fs from 'mz/fs'
-import slugify from 'slugify'
 
 import { NgModule } from '@angular/core'
 import { BrowserModule } from '@angular/platform-browser'
@@ -11,10 +10,12 @@ import TerminusCorePlugin, { HostAppService, ToolbarButtonProvider, TabRecoveryP
 import { SettingsTabProvider } from 'terminus-settings'
 
 import { AppearanceSettingsTabComponent } from './components/appearanceSettingsTab.component'
+import { ColorSchemeSettingsTabComponent } from './components/colorSchemeSettingsTab.component'
 import { TerminalTabComponent } from './components/terminalTab.component'
 import { ShellSettingsTabComponent } from './components/shellSettingsTab.component'
 import { TerminalSettingsTabComponent } from './components/terminalSettingsTab.component'
 import { ColorPickerComponent } from './components/colorPicker.component'
+import { ColorSchemePreviewComponent } from './components/colorSchemePreview.component'
 import { EditProfileModalComponent } from './components/editProfileModal.component'
 import { EnvironmentEditorComponent } from './components/environmentEditor.component'
 import { SearchPanelComponent } from './components/searchPanel.component'
@@ -30,7 +31,7 @@ import { TerminalDecorator } from './api/decorator'
 import { TerminalContextMenuItemProvider } from './api/contextMenuProvider'
 import { TerminalColorSchemeProvider } from './api/colorSchemeProvider'
 import { ShellProvider } from './api/shellProvider'
-import { TerminalSettingsTabProvider, AppearanceSettingsTabProvider, ShellSettingsTabProvider } from './settings'
+import { TerminalSettingsTabProvider, AppearanceSettingsTabProvider, ColorSchemeSettingsTabProvider, ShellSettingsTabProvider } from './settings'
 import { DebugDecorator } from './features/debug'
 import { PathDropDecorator } from './features/pathDrop'
 import { ZModemDecorator } from './features/zmodem'
@@ -68,6 +69,7 @@ import { XTermFrontend, XTermWebGLFrontend } from './frontends/xtermFrontend'
     ],
     providers: [
         { provide: SettingsTabProvider, useClass: AppearanceSettingsTabProvider, multi: true },
+        { provide: SettingsTabProvider, useClass: ColorSchemeSettingsTabProvider, multi: true },
         { provide: SettingsTabProvider, useClass: ShellSettingsTabProvider, multi: true },
         { provide: SettingsTabProvider, useClass: TerminalSettingsTabProvider, multi: true },
 
@@ -106,14 +108,17 @@ import { XTermFrontend, XTermWebGLFrontend } from './frontends/xtermFrontend'
     entryComponents: [
         TerminalTabComponent,
         AppearanceSettingsTabComponent,
+        ColorSchemeSettingsTabComponent,
         ShellSettingsTabComponent,
         TerminalSettingsTabComponent,
         EditProfileModalComponent,
     ] as any[],
     declarations: [
         ColorPickerComponent,
+        ColorSchemePreviewComponent,
         TerminalTabComponent,
         AppearanceSettingsTabComponent,
+        ColorSchemeSettingsTabComponent,
         ShellSettingsTabComponent,
         TerminalSettingsTabComponent,
         EditProfileModalComponent,
@@ -127,7 +132,7 @@ import { XTermFrontend, XTermWebGLFrontend } from './frontends/xtermFrontend'
     ],
 })
 export default class TerminalModule { // eslint-disable-line @typescript-eslint/no-extraneous-class
-    constructor (
+    private constructor (
         app: AppService,
         config: ConfigService,
         hotkeys: HotkeysService,
@@ -166,7 +171,7 @@ export default class TerminalModule { // eslint-disable-line @typescript-eslint/
                 argv = argv.slice(1)
             }
 
-            if(require('yargs').parse(argv.slice(1))._[0] !== 'open'){
+            if (require('yargs/yargs')(argv.slice(1)).parse()._[0] !== 'open'){
                 app.ready$.subscribe(() => {
                     terminal.openTab()
                 })
@@ -181,8 +186,7 @@ export default class TerminalModule { // eslint-disable-line @typescript-eslint/
                 hostApp.newWindow()
             }
             if (hotkey.startsWith('profile.')) {
-                const profiles = await terminal.getProfiles()
-                const profile = profiles.find(x => slugify(x.name).toLowerCase() === hotkey.split('.')[1])
+                const profile = await terminal.getProfileByID(hotkey.split('.')[1])
                 if (profile) {
                     terminal.openTabWithOptions(profile.sessionOptions)
                 }
@@ -190,6 +194,9 @@ export default class TerminalModule { // eslint-disable-line @typescript-eslint/
         })
 
         hostApp.cliOpenDirectory$.subscribe(async directory => {
+            if (directory.length > 1 && (directory.endsWith('/') || directory.endsWith('\\'))) {
+                directory = directory.substring(0, directory.length - 1)
+            }
             if (await fs.exists(directory)) {
                 if ((await fs.stat(directory)).isDirectory()) {
                     terminal.openTab(undefined, directory)

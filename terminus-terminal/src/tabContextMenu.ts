@@ -1,6 +1,6 @@
+import { MenuItemConstructorOptions } from 'electron'
 import { Injectable, NgZone, Optional, Inject } from '@angular/core'
-import { ToastrService } from 'ngx-toastr'
-import { ConfigService, BaseTabComponent, TabContextMenuItemProvider, TabHeaderComponent } from 'terminus-core'
+import { ConfigService, BaseTabComponent, TabContextMenuItemProvider, TabHeaderComponent, SplitTabComponent, NotificationsService } from 'terminus-core'
 import { TerminalTabComponent } from './components/terminalTab.component'
 import { UACService } from './services/uac.service'
 import { TerminalService } from './services/terminal.service'
@@ -13,23 +13,23 @@ export class SaveAsProfileContextMenu extends TabContextMenuItemProvider {
     constructor (
         private config: ConfigService,
         private zone: NgZone,
-        private toastr: ToastrService,
+        private notifications: NotificationsService,
     ) {
         super()
     }
 
-    async getItems (tab: BaseTabComponent, _tabHeader?: TabHeaderComponent): Promise<Electron.MenuItemConstructorOptions[]> {
+    async getItems (tab: BaseTabComponent, _tabHeader?: TabHeaderComponent): Promise<MenuItemConstructorOptions[]> {
         if (!(tab instanceof TerminalTabComponent)) {
             return []
         }
-        const items: Electron.MenuItemConstructorOptions[] = [
+        const items: MenuItemConstructorOptions[] = [
             {
                 label: 'Save as profile',
                 click: () => this.zone.run(async () => {
                     const profile = {
                         sessionOptions: {
                             ...tab.sessionOptions,
-                            cwd: await tab.session.getWorkingDirectory() || tab.sessionOptions.cwd,
+                            cwd: await tab.session?.getWorkingDirectory() ?? tab.sessionOptions.cwd,
                         },
                         name: tab.sessionOptions.command,
                     }
@@ -38,7 +38,7 @@ export class SaveAsProfileContextMenu extends TabContextMenuItemProvider {
                         profile,
                     ]
                     this.config.save()
-                    this.toastr.info('Saved')
+                    this.notifications.info('Saved')
                 }),
             },
         ]
@@ -61,10 +61,10 @@ export class NewTabContextMenu extends TabContextMenuItemProvider {
         super()
     }
 
-    async getItems (tab: BaseTabComponent, tabHeader?: TabHeaderComponent): Promise<Electron.MenuItemConstructorOptions[]> {
+    async getItems (tab: BaseTabComponent, tabHeader?: TabHeaderComponent): Promise<MenuItemConstructorOptions[]> {
         const profiles = await this.terminalService.getProfiles()
 
-        const items: Electron.MenuItemConstructorOptions[] = [
+        const items: MenuItemConstructorOptions[] = [
             {
                 label: 'New terminal',
                 click: () => this.zone.run(() => {
@@ -78,7 +78,7 @@ export class NewTabContextMenu extends TabContextMenuItemProvider {
                     click: () => this.zone.run(async () => {
                         let workingDirectory = this.config.store.terminal.workingDirectory
                         if (this.config.store.terminal.alwaysUseWorkingDirectory !== true && tab instanceof TerminalTabComponent) {
-                            workingDirectory = await tab.session.getWorkingDirectory()
+                            workingDirectory = await tab.session?.getWorkingDirectory()
                         }
                         await this.terminalService.openTab(profile, workingDirectory)
                     }),
@@ -106,10 +106,26 @@ export class NewTabContextMenu extends TabContextMenuItemProvider {
                 label: 'Duplicate as administrator',
                 click: () => this.zone.run(async () => {
                     this.terminalService.openTabWithOptions({
-                        ...(tab as TerminalTabComponent).sessionOptions,
+                        ...tab.sessionOptions,
                         runAsAdministrator: true,
                     })
                 }),
+            })
+        }
+
+        if (tab instanceof BaseTerminalTabComponent && tab.parent instanceof SplitTabComponent && tab.parent.getAllTabs().length > 1) {
+            items.push({
+                label: 'Focus all panes',
+                click: () => this.zone.run(() => {
+                    tab.focusAllPanes()
+                }),
+            })
+        }
+
+        if (tab instanceof TerminalTabComponent && tab.session?.supportsWorkingDirectory()) {
+            items.push({
+                label: 'Copy current path',
+                click: () => this.zone.run(() => tab.copyCurrentPath()),
             })
         }
 
@@ -120,16 +136,16 @@ export class NewTabContextMenu extends TabContextMenuItemProvider {
 /** @hidden */
 @Injectable()
 export class CopyPasteContextMenu extends TabContextMenuItemProvider {
-    weight = 1
+    weight = -10
 
     constructor (
         private zone: NgZone,
-        private toastr: ToastrService,
+        private notifications: NotificationsService,
     ) {
         super()
     }
 
-    async getItems (tab: BaseTabComponent, tabHeader?: TabHeaderComponent): Promise<Electron.MenuItemConstructorOptions[]> {
+    async getItems (tab: BaseTabComponent, tabHeader?: TabHeaderComponent): Promise<MenuItemConstructorOptions[]> {
         if (tabHeader) {
             return []
         }
@@ -140,8 +156,8 @@ export class CopyPasteContextMenu extends TabContextMenuItemProvider {
                     click: (): void => {
                         this.zone.run(() => {
                             setTimeout(() => {
-                                (tab as BaseTerminalTabComponent).frontend.copySelection()
-                                this.toastr.info('Copied')
+                                tab.frontend?.copySelection()
+                                this.notifications.notice('Copied')
                             })
                         })
                     },
@@ -149,7 +165,7 @@ export class CopyPasteContextMenu extends TabContextMenuItemProvider {
                 {
                     label: 'Paste',
                     click: (): void => {
-                        this.zone.run(() => (tab as BaseTerminalTabComponent).paste())
+                        this.zone.run(() => tab.paste())
                     },
                 },
             ]
@@ -164,17 +180,17 @@ export class LegacyContextMenu extends TabContextMenuItemProvider {
     weight = 1
 
     constructor (
-        @Optional() @Inject(TerminalContextMenuItemProvider) protected contextMenuProviders: TerminalContextMenuItemProvider[],
+        @Optional() @Inject(TerminalContextMenuItemProvider) protected contextMenuProviders: TerminalContextMenuItemProvider[]|null,
     ) {
         super()
     }
 
-    async getItems (tab: BaseTabComponent, _tabHeader?: TabHeaderComponent): Promise<Electron.MenuItemConstructorOptions[]> {
+    async getItems (tab: BaseTabComponent, _tabHeader?: TabHeaderComponent): Promise<MenuItemConstructorOptions[]> {
         if (!this.contextMenuProviders) {
             return []
         }
         if (tab instanceof BaseTerminalTabComponent) {
-            let items: Electron.MenuItemConstructorOptions[] = []
+            let items: MenuItemConstructorOptions[] = []
             for (const p of this.contextMenuProviders) {
                 items = items.concat(await p.getItems(tab))
             }

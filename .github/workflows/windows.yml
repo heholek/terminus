@@ -11,7 +11,7 @@ jobs:
     - name: Installing Node
       uses: actions/setup-node@v1
       with:
-        node-version: 10
+        node-version: 14
 
     - name: Build
       shell: powershell
@@ -33,6 +33,15 @@ jobs:
     - name: Build packages without signing
       run: node scripts/build-windows.js
       if: github.repository != 'Eugeny/terminus' || github.event_name != 'push'
+
+    - name: Upload symbols
+      run: |
+        npm install @sentry/cli
+        node scripts/sentry-upload.js
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+        SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
 
     - name: Package artifacts
       run: |

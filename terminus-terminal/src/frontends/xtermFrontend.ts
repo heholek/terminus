@@ -33,13 +33,14 @@ export class XTermFrontend extends Frontend {
     private search = new SearchAddon()
     private fitAddon = new FitAddon()
     private serializeAddon = new SerializeAddon()
-    private ligaturesAddon: LigaturesAddon
+    private ligaturesAddon?: LigaturesAddon
     private opened = false
 
     constructor () {
         super()
         this.xterm = new Terminal({
             allowTransparency: true,
+            windowsMode: process.platform === 'win32',
         })
         this.xtermCore = (this.xterm as any)._core
 
@@ -98,18 +99,20 @@ export class XTermFrontend extends Frontend {
         this.resizeHandler = () => {
             try {
                 if (this.xterm.element && getComputedStyle(this.xterm.element).getPropertyValue('height') !== 'auto') {
-                    let t = window.getComputedStyle(this.xterm.element.parentElement!)
-                    let r = parseInt(t.getPropertyValue('height'))
-                    let n = Math.max(0, parseInt(t.getPropertyValue('width')))
-                    let o = window.getComputedStyle(this.xterm.element)
-                    let i = r - (parseInt(o.getPropertyValue('padding-top')) + parseInt(o.getPropertyValue('padding-bottom')))
-                    let l = n - (parseInt(o.getPropertyValue('padding-right')) + parseInt(o.getPropertyValue('padding-left'))) - this.xtermCore.viewport.scrollBarWidth
-                    let actualCellWidth = this.xtermCore._renderService.dimensions.actualCellWidth || 9
-                    let actualCellHeight = this.xtermCore._renderService.dimensions.actualCellHeight || 17
-                    let cols = Math.floor(l / actualCellWidth)
-                    let rows = Math.floor(i / actualCellHeight)
+                    const t = window.getComputedStyle(this.xterm.element.parentElement!)
+                    const r = parseInt(t.getPropertyValue('height'))
+                    const n = Math.max(0, parseInt(t.getPropertyValue('width')))
+                    const o = window.getComputedStyle(this.xterm.element)
+                    const i = r - (parseInt(o.getPropertyValue('padding-top')) + parseInt(o.getPropertyValue('padding-bottom')))
+                    const l = n - (parseInt(o.getPropertyValue('padding-right')) + parseInt(o.getPropertyValue('padding-left'))) - this.xtermCore.viewport.scrollBarWidth
+                    const actualCellWidth = this.xtermCore._renderService.dimensions.actualCellWidth || 9
+                    const actualCellHeight = this.xtermCore._renderService.dimensions.actualCellHeight || 17
+                    const cols = Math.floor(l / actualCellWidth)
+                    const rows = Math.floor(i / actualCellHeight)
 
-                    this.xterm.resize(cols, rows)
+                    if (!isNaN(cols) && !isNaN(rows)) {
+                        this.xterm.resize(cols, rows)
+                    }
                 }
             } catch (e) {
                 // tends to throw when element wasn't shown yet
@@ -121,13 +124,21 @@ export class XTermFrontend extends Frontend {
             this.xtermCore.updateCursorStyle(e)
             keyboardEventHandler('keyup', e)
         }
+
+        this.xterm.buffer.onBufferChange(() => {
+            const altBufferActive = this.xterm.buffer.active.type === 'alternate'
+            this.alternateScreenActive.next(altBufferActive)
+        })
     }
 
-    attach (host: HTMLElement): void {
+    async attach (host: HTMLElement): Promise<void> {
         this.configure()
 
         this.xterm.open(host)
         this.opened = true
+
+        // Work around font loading bugs
+        await new Promise(resolve => setTimeout(resolve, process.env.XWEB ? 1000 : 0))
 
         if (this.enableWebGL) {
             this.xterm.loadAddon(new WebglAddon())
@@ -145,11 +156,11 @@ export class XTermFrontend extends Frontend {
         host.addEventListener('dragOver', (event: any) => this.dragOver.next(event))
         host.addEventListener('drop', event => this.drop.next(event))
 
-        host.addEventListener('mousedown', event => this.mouseEvent.next(event as MouseEvent))
-        host.addEventListener('mouseup', event => this.mouseEvent.next(event as MouseEvent))
+        host.addEventListener('mousedown', event => this.mouseEvent.next(event))
+        host.addEventListener('mouseup', event => this.mouseEvent.next(event))
         host.addEventListener('mousewheel', event => this.mouseEvent.next(event as MouseEvent))
 
-        const ro = new window['ResizeObserver'](() => this.resizeHandler())
+        const ro = new window['ResizeObserver'](() => setTimeout(() => this.resizeHandler()))
         ro.observe(host)
     }
 
@@ -162,10 +173,17 @@ export class XTermFrontend extends Frontend {
     }
 
     copySelection (): void {
-        require('electron').remote.clipboard.write({
-            text: this.getSelection(),
-            html: this.getSelectionAsHTML(),
-        })
+        const text = this.getSelection()
+        if (text.length < 1024 * 32) {
+            require('electron').remote.clipboard.write({
+                text: this.getSelection(),
+                html: this.getSelectionAsHTML(),
+            })
+        } else {
+            require('electron').remote.clipboard.write({
+                text: this.getSelection(),
+            })
+        }
     }
 
     clearSelection (): void {
@@ -215,6 +233,7 @@ export class XTermFrontend extends Frontend {
         this.xterm.setOption('cursorBlink', config.terminal.cursorBlink)
         this.xterm.setOption('macOptionIsMeta', config.terminal.altIsMeta)
         this.xterm.setOption('scrollback', 100000)
+        this.xterm.setOption('wordSeparator', config.terminal.wordSeparator)
         this.configuredFontSize = config.terminal.fontSize
         this.configuredLinePadding = config.terminal.linePadding
         this.setFontSize()
@@ -223,6 +242,7 @@ export class XTermFrontend extends Frontend {
 
         const theme: ITheme = {
             foreground: config.terminal.colorScheme.foreground,
+            selection: config.terminal.colorScheme.selection || '#88888888',
             background: config.terminal.background === 'colorScheme' ? config.terminal.colorScheme.background : '#00000000',
             cursor: config.terminal.colorScheme.cursor,
         }
@@ -281,7 +301,7 @@ export class XTermFrontend extends Frontend {
             html += this.getLineAsHTML(selection.startRow, selection.startColumn, selection.endColumn)
         } else {
             html += this.getLineAsHTML(selection.startRow, selection.startColumn, this.xterm.cols)
-            for (let y = selection.startRow! + 1; y < selection.endRow; y++) {
+            for (let y = selection.startRow + 1; y < selection.endRow; y++) {
                 html += this.getLineAsHTML(y, 0, this.xterm.cols)
             }
             html += this.getLineAsHTML(selection.endRow, 0, selection.endColumn)
@@ -304,7 +324,7 @@ export class XTermFrontend extends Frontend {
     private getLineAsHTML (y: number, start: number, end: number): string {
         let html = '<div>'
         let lastStyle: string|null = null
-        const line = (this.xterm.buffer.getLine(y) as any)._line
+        const line = (this.xterm.buffer.active.getLine(y) as any)._line
         const cell = new CellData()
         for (let i = start; i < end; i++) {
             line.loadCell(i, cell)

@@ -36,7 +36,7 @@ import { ConfigService } from './services/config.service'
 import { StandardTheme, StandardCompactTheme, PaperTheme } from './theme'
 import { CoreConfigProvider } from './config'
 import { AppHotkeyProvider } from './hotkeys'
-import { TaskCompletionContextMenu, CommonOptionsContextMenu, CloseContextMenu } from './tabContextMenu'
+import { TaskCompletionContextMenu, CommonOptionsContextMenu, TabManagementContextMenu } from './tabContextMenu'
 
 import 'perfect-scrollbar/css/perfect-scrollbar.css'
 import 'ng2-dnd/bundles/style.css'
@@ -44,8 +44,11 @@ import 'ng2-dnd/bundles/style.css'
 // PerfectScrollbar fix
 import { fromEvent } from 'rxjs/internal/observable/fromEvent'
 import { merge } from 'rxjs/internal/observable/merge'
-require('rxjs').fromEvent = fromEvent
-require('rxjs').merge = merge
+
+try {
+    require('rxjs').fromEvent = fromEvent
+    require('rxjs').merge = merge
+} catch {}
 
 const PROVIDERS = [
     { provide: HotkeyProvider, useClass: AppHotkeyProvider, multi: true },
@@ -54,7 +57,7 @@ const PROVIDERS = [
     { provide: Theme, useClass: PaperTheme, multi: true },
     { provide: ConfigProvider, useClass: CoreConfigProvider, multi: true },
     { provide: TabContextMenuItemProvider, useClass: CommonOptionsContextMenu, multi: true },
-    { provide: TabContextMenuItemProvider, useClass: CloseContextMenu, multi: true },
+    { provide: TabContextMenuItemProvider, useClass: TabManagementContextMenu, multi: true },
     { provide: TabContextMenuItemProvider, useClass: TaskCompletionContextMenu, multi: true },
     { provide: TabRecoveryProvider, useClass: SplitTabRecoveryProvider, multi: true },
     { provide: PERFECT_SCROLLBAR_CONFIG, useValue: { suppressScrollX: true } },
@@ -110,7 +113,7 @@ export default class AppModule { // eslint-disable-line @typescript-eslint/no-ex
         })
     }
 
-    static forRoot (): ModuleWithProviders {
+    static forRoot (): ModuleWithProviders<AppModule> {
         return {
             ngModule: AppModule,
             providers: PROVIDERS,

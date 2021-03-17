@@ -8,7 +8,7 @@ export type TabComponentType = new (...args: any[]) => BaseTabComponent
 @Injectable({ providedIn: 'root' })
 export class TabsService {
     /** @hidden */
-    constructor (
+    private constructor (
         private componentFactoryResolver: ComponentFactoryResolver,
         private injector: Injector,
         private tabRecovery: TabRecoveryService,
@@ -22,7 +22,7 @@ export class TabsService {
         const componentRef = componentFactory.create(this.injector)
         const tab = componentRef.instance
         tab.hostView = componentRef.hostView
-        Object.assign(tab, inputs || {})
+        Object.assign(tab, inputs ?? {})
         return tab
     }
 
@@ -30,7 +30,7 @@ export class TabsService {
      * Duplicates an existing tab instance (using the tab recovery system)
      */
     async duplicate (tab: BaseTabComponent): Promise<BaseTabComponent|null> {
-        const token = await tab.getRecoveryToken()
+        const token = await this.tabRecovery.getFullRecoveryToken(tab)
         if (!token) {
             return null
         }

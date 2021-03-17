@@ -1,15 +1,17 @@
 /* eslint-disable @typescript-eslint/explicit-module-boundary-types */
+import type { MenuItemConstructorOptions } from 'electron'
 import { Injectable, NgZone } from '@angular/core'
 import { Subscription } from 'rxjs'
 import { AppService } from './services/app.service'
 import { BaseTabComponent } from './components/baseTab.component'
 import { TabHeaderComponent } from './components/tabHeader.component'
+import { SplitTabComponent, SplitDirection } from './components/splitTab.component'
 import { TabContextMenuItemProvider } from './api/tabContextMenuProvider'
 
 /** @hidden */
 @Injectable()
-export class CloseContextMenu extends TabContextMenuItemProvider {
-    weight = -5
+export class TabManagementContextMenu extends TabContextMenuItemProvider {
+    weight = 99
 
     constructor (
         private app: AppService,
@@ -18,8 +20,8 @@ export class CloseContextMenu extends TabContextMenuItemProvider {
         super()
     }
 
-    async getItems (tab: BaseTabComponent, tabHeader?: TabHeaderComponent): Promise<Electron.MenuItemConstructorOptions[]> {
-        let items = [
+    async getItems (tab: BaseTabComponent, tabHeader?: TabHeaderComponent): Promise<MenuItemConstructorOptions[]> {
+        let items: MenuItemConstructorOptions[] = [
             {
                 label: 'Close',
                 click: () => this.zone.run(() => {
@@ -59,6 +61,24 @@ export class CloseContextMenu extends TabContextMenuItemProvider {
                     }),
                 },
             ]
+        } else {
+            if (tab.parent instanceof SplitTabComponent) {
+                const directions: SplitDirection[] = ['r', 'b', 'l', 't']
+                items.push({
+                    label: 'Split',
+                    submenu: directions.map(dir => ({
+                        label: {
+                            r: 'Right',
+                            b: 'Down',
+                            l: 'Left',
+                            t: 'Up',
+                        }[dir],
+                        click: () => this.zone.run(() => {
+                            (tab.parent as SplitTabComponent).splitTab(tab, dir)
+                        }),
+                    })) as MenuItemConstructorOptions[],
+                })
+            }
         }
         return items
     }
@@ -86,12 +106,14 @@ export class CommonOptionsContextMenu extends TabContextMenuItemProvider {
         super()
     }
 
-    async getItems (tab: BaseTabComponent, tabHeader?: TabHeaderComponent): Promise<Electron.MenuItemConstructorOptions[]> {
+    async getItems (tab: BaseTabComponent, tabHeader?: TabHeaderComponent): Promise<MenuItemConstructorOptions[]> {
+        let items: MenuItemConstructorOptions[] = []
         if (tabHeader) {
-            return [
+            items = [
+                ...items,
                 {
                     label: 'Rename',
-                    click: () => this.zone.run(() => tabHeader?.showRenameTabModal()),
+                    click: () => this.zone.run(() => tabHeader.showRenameTabModal()),
                 },
                 {
                     label: 'Duplicate',
@@ -99,7 +121,7 @@ export class CommonOptionsContextMenu extends TabContextMenuItemProvider {
                 },
                 {
                     label: 'Color',
-                    sublabel: COLORS.find(x => x.value === tab.color)!.name,
+                    sublabel: COLORS.find(x => x.value === tab.color)?.name,
                     submenu: COLORS.map(color => ({
                         label: color.name,
                         type: 'radio',
@@ -107,11 +129,11 @@ export class CommonOptionsContextMenu extends TabContextMenuItemProvider {
                         click: () => this.zone.run(() => {
                             tab.color = color.value
                         }),
-                    })) as Electron.MenuItemConstructorOptions[],
+                    })) as MenuItemConstructorOptions[],
                 },
             ]
         }
-        return []
+        return items
     }
 }
 
@@ -125,9 +147,9 @@ export class TaskCompletionContextMenu extends TabContextMenuItemProvider {
         super()
     }
 
-    async getItems (tab: BaseTabComponent): Promise<Electron.MenuItemConstructorOptions[]> {
+    async getItems (tab: BaseTabComponent): Promise<MenuItemConstructorOptions[]> {
         const process = await tab.getCurrentProcess()
-        let items: Electron.MenuItemConstructorOptions[] = []
+        const items: MenuItemConstructorOptions[] = []
 
         const extTab: (BaseTabComponent & { __completionNotificationEnabled?: boolean, __outputNotificationSubscription?: Subscription|null }) = tab
 

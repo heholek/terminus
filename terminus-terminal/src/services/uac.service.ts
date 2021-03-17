@@ -8,7 +8,7 @@ import { SessionOptions } from '../api/interfaces'
 export class UACService {
     isAvailable = false
 
-    constructor (
+    private constructor (
         private electron: ElectronService,
     ) {
         this.isAvailable = isWindowsBuild(WIN_BUILD_CONPTY_SUPPORTED)
@@ -32,7 +32,7 @@ export class UACService {
         }
 
         const options = { ...sessionOptions }
-        options.args = [options.command, ...options.args]
+        options.args = [options.command, ...options.args ?? []]
         options.command = helperPath
         return options
     }

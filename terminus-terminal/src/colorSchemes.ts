@@ -8,7 +8,7 @@ import { TerminalColorScheme } from './api/interfaces'
 @Injectable()
 export class HyperColorSchemes extends TerminalColorSchemeProvider {
     async getSchemes (): Promise<TerminalColorScheme[]> {
-        const pluginsPath = path.join(process.env.HOME as string, '.hyper_plugins', 'node_modules')
+        const pluginsPath = path.join(process.env.HOME!, '.hyper_plugins', 'node_modules')
         if (!await fs.exists(pluginsPath)) {
             return []
         }
@@ -20,10 +20,10 @@ export class HyperColorSchemes extends TerminalColorSchemeProvider {
             try {
                 const module = (global as any).require(path.join(pluginsPath, plugin))
                 if (module.decorateConfig) {
-                    let config: any
+                    let config: any = {}
                     try {
                         config = module.decorateConfig({})
-                    } catch (error) {
+                    } catch {
                         console.warn('Could not load Hyper theme:', plugin)
                         return
                     }
