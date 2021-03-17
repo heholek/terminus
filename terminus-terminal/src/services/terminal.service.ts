@@ -19,7 +19,7 @@ export class TerminalService {
     get shells$ (): Observable<Shell[]> { return this.shells }
 
     /** @hidden */
-    constructor (
+    private constructor (
         private app: AppService,
         private config: ConfigService,
         private uac: UACService,
@@ -34,12 +34,14 @@ export class TerminalService {
         })
     }
 
-    async getProfiles (includeHidden?: boolean): Promise<Profile[]> {
+    async getProfiles ({ includeHidden, skipDefault }: { includeHidden?: boolean, skipDefault?: boolean } = {}): Promise<Profile[]> {
         const shells = await this.shells$.toPromise()
         return [
             ...this.config.store.terminal.profiles,
-            ...shells.filter(x => includeHidden || !x.hidden).map(shell => ({
+            // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+            ...skipDefault ? [] : shells.filter(x => includeHidden || !x.hidden).map(shell => ({
                 name: shell.name,
+                shell: shell.id,
                 icon: shell.icon,
                 sessionOptions: this.optionsFromShell(shell),
                 isBuiltin: true,
@@ -47,17 +49,28 @@ export class TerminalService {
         ]
     }
 
+    getProfileID (profile: Profile): string {
+        return slugify(profile.name, { remove: /[:.]/g }).toLowerCase()
+    }
+
+    async getProfileByID (id: string): Promise<Profile|null> {
+        const profiles = await this.getProfiles({ includeHidden: true })
+        return profiles.find(x => this.getProfileID(x) === id) ?? null
+    }
+
     /**
      * Launches a new terminal with a specific shell and CWD
      * @param pause Wait for a keypress when the shell exits
      */
-    async openTab (profile?: Profile, cwd?: string|null, pause?: boolean): Promise<TerminalTabComponent> {
+    async openTab (profile?: Profile|null, cwd?: string|null, pause?: boolean): Promise<TerminalTabComponent> {
         if (!profile) {
-            const profiles = await this.getProfiles(true)
-            profile = profiles.find(x => slugify(x.name).toLowerCase() === this.config.store.terminal.profile) || profiles[0]
+            profile = await this.getProfileByID(this.config.store.terminal.profile)
+            if (!profile) {
+                profile = (await this.getProfiles({ includeHidden: true }))[0]
+            }
         }
 
-        cwd = cwd || profile.sessionOptions.cwd
+        cwd = cwd ?? profile.sessionOptions.cwd
 
         if (cwd && !fs.existsSync(cwd)) {
             console.warn('Ignoring non-existent CWD:', cwd)
@@ -77,20 +90,23 @@ export class TerminalService {
                     }
                 }
             }
-            cwd = cwd || this.config.store.terminal.workingDirectory
-            cwd = cwd || null
+            cwd = cwd ?? this.config.store.terminal.workingDirectory
         }
 
         this.logger.info(`Starting profile ${profile.name}`, profile)
         const sessionOptions = {
             ...profile.sessionOptions,
             pauseAfterExit: pause,
-            cwd: cwd || undefined,
+            cwd: cwd ?? undefined,
         }
 
         const tab = this.openTabWithOptions(sessionOptions)
-        if (profile?.color) {
-            (this.app.getParentTab(tab) || tab).color = profile.color
+        if (profile.color) {
+            (this.app.getParentTab(tab) ?? tab).color = profile.color
+        }
+        if (profile.disableDynamicTitle) {
+            tab.enableDynamicTitle = false
+            tab.setTitle(profile.name)
         }
         return tab
     }
@@ -98,7 +114,7 @@ export class TerminalService {
     optionsFromShell (shell: Shell): SessionOptions {
         return {
             command: shell.command,
-            args: shell.args || [],
+            args: shell.args ?? [],
             env: shell.env,
         }
     }

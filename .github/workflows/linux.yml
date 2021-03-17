@@ -11,7 +11,7 @@ jobs:
     - name: Install Node
       uses: actions/setup-node@v1
       with:
-        node-version: 10
+        node-version: 15
 
     - name: Install deps
       run: |
@@ -21,6 +21,10 @@ jobs:
         cd ..
         rm app/node_modules/.yarn-integrity
         yarn
+        ./node_modules/.bin/patch-package
+        cd app
+        ../node_modules/.bin/patch-package
+        cd ..
 
     - name: Build native deps
       run: scripts/build-native.js
@@ -36,6 +40,16 @@ jobs:
       env:
         DEBUG: electron-builder,electron-builder:*
         GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        USE_HARD_LINKS: false
+
+    - name: Upload symbols
+      run: |
+        sudo npm install -g @sentry/cli --unsafe-perm
+        ./scripts/sentry-upload.js
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+        SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
 
     - name: Package artifacts
       run: |

@@ -16,7 +16,7 @@ try {
 // WSL Distribution List
 // https://docs.microsoft.com/en-us/windows/wsl/install-win10#install-your-linux-distribution-of-choice
 /* eslint-disable quote-props */
-const wslIconMap: { [key: string]: string } = {
+const wslIconMap: Record<string, string> = {
     'Alpine': require('../icons/alpine.svg'),
     'Debian': require('../icons/debian.svg'),
     'kali-linux': require('../icons/linux.svg'),
@@ -72,7 +72,7 @@ export class WSLShellProvider extends ShellProvider {
                 return [{
                     id: 'wsl',
                     name: 'WSL / Bash on Windows',
-                    icon: wslIconMap['Linux'],
+                    icon: wslIconMap.Linux,
                     command: bashPath,
                     env: {
                         TERM: 'xterm-color',
@@ -88,13 +88,16 @@ export class WSLShellProvider extends ShellProvider {
             if (!childKey.DistributionName) {
                 continue
             }
+            const wslVersion = (childKey.Flags?.value || 0) & 8 ? 2 : 1
             const name = childKey.DistributionName.value
+            const fsBase = wslVersion === 2 ? `\\\\wsl$\\${name}` : childKey.BasePath.value as string + '\\rootfs'
+            const slug = slugify(name, { remove: /[:.]/g })
             const shell: Shell = {
-                id: `wsl-${slugify(name)}`,
+                id: `wsl-${slug}`,
                 name: `WSL / ${name}`,
                 command: wslPath,
                 args: ['-d', name],
-                fsBase: childKey.BasePath.value as string + '\\rootfs',
+                fsBase,
                 env: {
                     TERM: 'xterm-color',
                     COLORTERM: 'truecolor',

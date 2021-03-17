@@ -1,13 +1,23 @@
+import type { BrowserWindow, TouchBar, MenuItemConstructorOptions } from 'electron'
 import * as path from 'path'
+import * as fs from 'mz/fs'
 import shellEscape from 'shell-escape'
 import { Observable, Subject } from 'rxjs'
 import { Injectable, NgZone, EventEmitter } from '@angular/core'
 import { ElectronService } from './electron.service'
 import { Logger, LogService } from './log.service'
-import { isWindowsBuild, WIN_BUILD_FLUENT_BG_MOVE_BUG_FIXED, WIN_BUILD_FLUENT_BG_SUPPORTED } from '../utils'
+import { isWindowsBuild, WIN_BUILD_FLUENT_BG_SUPPORTED } from '../utils'
+
+/* eslint-disable block-scoped-var */
+
+try {
+    var wnr = require('windows-native-registry') // eslint-disable-line @typescript-eslint/no-var-requires, no-var
+} catch (_) { }
 
 export enum Platform {
-    Linux, macOS, Windows,
+    Linux = 'Linux',
+    macOS = 'macOS',
+    Windows = 'Windows',
 }
 
 export interface Bounds {
@@ -42,6 +52,7 @@ export class HostAppService {
     private windowMoved = new Subject<void>()
     private windowFocused = new Subject<void>()
     private displayMetricsChanged = new Subject<void>()
+    private displaysChanged = new Subject<void>()
     private logger: Logger
     private windowId: number
 
@@ -90,6 +101,8 @@ export class HostAppService {
     get windowFocused$ (): Observable<void> { return this.windowFocused }
 
     get displayMetricsChanged$ (): Observable<void> { return this.displayMetricsChanged }
+
+    get displaysChanged$ (): Observable<void> { return this.displaysChanged }
 
     private constructor (
         private zone: NgZone,
@@ -140,9 +153,14 @@ export class HostAppService {
             this.zone.run(() => this.displayMetricsChanged.next())
         })
 
-        electron.ipcRenderer.on('host:second-instance', (_$event, argv: any, cwd: string) => this.zone.run(() => {
+        electron.ipcRenderer.on('host:displays-changed', () => {
+            this.zone.run(() => this.displaysChanged.next())
+        })
+
+        electron.ipcRenderer.on('cli', (_$event, argv: any, cwd: string, secondInstance: boolean) => this.zone.run(async () => {
             this.logger.info('Second instance', argv)
             const op = argv._[0]
+            const opAsPath = op ? path.resolve(cwd, op) : null
             if (op === 'open') {
                 this.cliOpenDirectory.next(path.resolve(cwd, argv.directory))
             } else if (op === 'run') {
@@ -155,9 +173,13 @@ export class HostAppService {
                 this.cliPaste.next(text)
             } else if (op === 'profile') {
                 this.cliOpenProfile.next(argv.profileName)
-            } else if (op === undefined) {
+            } else if (secondInstance && op === undefined) {
                 this.newWindow()
-            } else {
+            } else if (opAsPath && (await fs.lstat(opAsPath)).isDirectory()) {
+                this.cliOpenDirectory.next(opAsPath)
+            }
+
+            if (secondInstance) {
                 this.secondInstance.next()
             }
         }))
@@ -166,11 +188,7 @@ export class HostAppService {
             this.configChangeBroadcast.next()
         }))
 
-
-        if (
-            isWindowsBuild(WIN_BUILD_FLUENT_BG_SUPPORTED) &&
-            !isWindowsBuild(WIN_BUILD_FLUENT_BG_MOVE_BUG_FIXED)
-        ) {
+        if (isWindowsBuild(WIN_BUILD_FLUENT_BG_SUPPORTED)) {
             electron.ipcRenderer.send('window-set-disable-vibrancy-while-dragging', true)
         }
     }
@@ -178,8 +196,8 @@ export class HostAppService {
     /**
      * Returns the current remote [[BrowserWindow]]
      */
-    getWindow (): Electron.BrowserWindow {
-        return this.electron.BrowserWindow.fromId(this.windowId)
+    getWindow (): BrowserWindow {
+        return this.electron.BrowserWindow.fromId(this.windowId)!
     }
 
     newWindow (): void {
@@ -229,30 +247,30 @@ export class HostAppService {
      * @param type `null`, or `fluent` when supported (Windowd only)
      */
     setVibrancy (enable: boolean, type: string|null): void {
-        if (!isWindowsBuild(WIN_BUILD_FLUENT_BG_SUPPORTED)) {
+        if (this.platform === Platform.Windows && !isWindowsBuild(WIN_BUILD_FLUENT_BG_SUPPORTED)) {
             type = null
         }
         document.body.classList.toggle('vibrant', enable)
         this.electron.ipcRenderer.send('window-set-vibrancy', enable, type)
     }
 
-    setTitle (title: string): void {
-        this.electron.ipcRenderer.send('window-set-title', title)
+    setTitle (title?: string): void {
+        this.electron.ipcRenderer.send('window-set-title', title ?? 'Terminus')
     }
 
-    setTouchBar (touchBar: Electron.TouchBar): void {
+    setTouchBar (touchBar: TouchBar): void {
         this.getWindow().setTouchBar(touchBar)
     }
 
-    popupContextMenu (menuDefinition: Electron.MenuItemConstructorOptions[]): void {
+    popupContextMenu (menuDefinition: MenuItemConstructorOptions[]): void {
         this.electron.Menu.buildFromTemplate(menuDefinition).popup({})
     }
 
     /**
      * Notifies other windows of config file changes
      */
-    broadcastConfigChange (): void {
-        this.electron.ipcRenderer.send('app:config-change')
+    broadcastConfigChange (configStore: Record<string, any>): void {
+        this.electron.ipcRenderer.send('app:config-change', configStore)
     }
 
     emitReady (): void {
@@ -265,6 +283,24 @@ export class HostAppService {
 
     closeWindow (): void {
         this.electron.ipcRenderer.send('window-close')
+    }
+
+    registerGlobalHotkey (specs: string[]): void {
+        this.electron.ipcRenderer.send('app:register-global-hotkey', specs)
+    }
+
+    useBuiltinGraphics (): void {
+        const keyPath = 'SOFTWARE\\Microsoft\\DirectX\\UserGpuPreferences'
+        const valueName = this.electron.app.getPath('exe')
+        if (this.platform === Platform.Windows) {
+            if (!wnr.getRegistryValue(wnr.HK.CU, keyPath, valueName)) {
+                wnr.setRegistryValue(wnr.HK.CU, keyPath, valueName, wnr.REG.SZ, 'GpuPreference=1;')
+            }
+        }
+    }
+
+    setTrafficLightInset (x: number, y: number): void {
+        this.getWindow().setTrafficLightPosition({ x, y })
     }
 
     relaunch (): void {

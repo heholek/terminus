@@ -1,4 +1,6 @@
 import colors from 'ansi-colors'
+import stripAnsi from 'strip-ansi'
+import socksv5 from 'socksv5'
 import { BaseSession } from 'terminus-terminal'
 import { Server, Socket, createServer, createConnection } from 'net'
 import { Client, ClientChannel } from 'ssh2'
@@ -16,14 +18,15 @@ export enum SSHAlgorithmType {
     HMAC = 'hmac',
     KEX = 'kex',
     CIPHER = 'cipher',
-    HOSTKEY = 'serverHostKey'
+    HOSTKEY = 'serverHostKey',
 }
 
 export interface SSHConnection {
     name: string
     host: string
-    port: number
+    port?: number
     user: string
+    auth?: null|'password'|'publicKey'|'agent'|'keyboardInteractive'
     password?: string
     privateKey?: string
     group: string | null
@@ -34,12 +37,17 @@ export interface SSHConnection {
     color?: string
     x11?: boolean
     skipBanner?: boolean
-
-    algorithms?: {[t: string]: string[]}
+    disableDynamicTitle?: boolean
+    jumpHost?: string
+    agentForward?: boolean
+    warnOnClose?: boolean
+    algorithms?: Record<string, string[]>
 }
 
 export enum PortForwardType {
-    Local, Remote
+    Local = 'Local',
+    Remote = 'Remote',
+    Dynamic = 'Dynamic',
 }
 
 export class ForwardedPort {
@@ -51,13 +59,40 @@ export class ForwardedPort {
 
     private listener: Server
 
-    async startLocalListener (callback: (Socket) => void): Promise<void> {
-        this.listener = createServer(callback)
-        return new Promise((resolve, reject) => {
-            this.listener.listen(this.port, '127.0.0.1')
-            this.listener.on('error', reject)
-            this.listener.on('listening', resolve)
-        })
+    async startLocalListener (callback: (accept: () => Socket, reject: () => void, sourceAddress: string|null, sourcePort: number|null, targetAddress: string, targetPort: number) => void): Promise<void> {
+        if (this.type === PortForwardType.Local) {
+            this.listener = createServer(s => callback(
+                () => s,
+                () => s.destroy(),
+                s.remoteAddress ?? null,
+                s.remotePort ?? null,
+                this.targetAddress,
+                this.targetPort,
+            ))
+            return new Promise((resolve, reject) => {
+                this.listener.listen(this.port, this.host)
+                this.listener.on('error', reject)
+                this.listener.on('listening', resolve)
+            })
+        } else if (this.type === PortForwardType.Dynamic) {
+            return new Promise((resolve, reject) => {
+                this.listener = socksv5.createServer((info, acceptConnection, rejectConnection) => {
+                    callback(
+                        () => acceptConnection(true),
+                        () => rejectConnection(),
+                        null,
+                        null,
+                        info.dstAddr,
+                        info.dstPort,
+                    )
+                })
+                this.listener.on('error', reject)
+                this.listener.listen(this.port, this.host, resolve)
+                ;(this.listener as any).useAuth(socksv5.auth.None())
+            })
+        } else {
+            throw new Error('Invalid forward type for a local listener')
+        }
     }
 
     stopLocalListener (): void {
@@ -67,25 +102,35 @@ export class ForwardedPort {
     toString (): string {
         if (this.type === PortForwardType.Local) {
             return `(local) ${this.host}:${this.port} → (remote) ${this.targetAddress}:${this.targetPort}`
-        } else {
+        } if (this.type === PortForwardType.Remote) {
             return `(remote) ${this.host}:${this.port} → (local) ${this.targetAddress}:${this.targetPort}`
+        } else {
+            return `(dynamic) ${this.host}:${this.port}`
         }
     }
 }
 
 export class SSHSession extends BaseSession {
     scripts?: LoginScript[]
-    shell: ClientChannel
+    shell?: ClientChannel
     ssh: Client
     forwardedPorts: ForwardedPort[] = []
     logger: Logger
+    jumpStream: any
 
     get serviceMessage$ (): Observable<string> { return this.serviceMessage }
     private serviceMessage = new Subject<string>()
 
     constructor (public connection: SSHConnection) {
         super()
-        this.scripts = connection.scripts || []
+        this.scripts = connection.scripts ?? []
+        this.destroyed$.subscribe(() => {
+            for (const port of this.forwardedPorts) {
+                if (port.type === PortForwardType.Local) {
+                    port.stopLocalListener()
+                }
+            }
+        })
     }
 
     async start (): Promise<void> {
@@ -95,6 +140,10 @@ export class SSHSession extends BaseSession {
             this.shell = await this.openShellChannel({ x11: this.connection.x11 })
         } catch (err) {
             this.emitServiceMessage(colors.bgRed.black(' X ') + ` Remote rejected opening a shell channel: ${err}`)
+            if (err.toString().includes('Unable to request X11')) {
+                this.emitServiceMessage('    Make sure `xauth` is installed on the remote side')
+            }
+            return
         }
 
         this.shell.on('greeting', greeting => {
@@ -131,7 +180,7 @@ export class SSHSession extends BaseSession {
 
                     if (match) {
                         this.logger.info('Executing script: "' + cmd + '"')
-                        this.shell.write(cmd + '\n')
+                        this.shell!.write(cmd + '\n')
                         this.scripts = this.scripts.filter(x => x !== script)
                     } else {
                         if (script.optional) {
@@ -167,6 +216,7 @@ export class SSHSession extends BaseSession {
             const socket = new Socket()
             socket.connect(forward.targetPort, forward.targetAddress)
             socket.on('error', e => {
+                // eslint-disable-next-line @typescript-eslint/no-base-to-string
                 this.emitServiceMessage(colors.bgRed.black(' X ') + ` Could not forward the remote connection to ${forward.targetAddress}:${forward.targetPort}: ${e}`)
                 reject()
             })
@@ -186,18 +236,25 @@ export class SSHSession extends BaseSession {
 
         this.ssh.on('x11', (details, accept, reject) => {
             this.logger.info(`Incoming X11 connection from ${details.srcIP}:${details.srcPort}`)
-            let displaySpec = process.env.DISPLAY || ':0'
+            const displaySpec = process.env.DISPLAY ?? ':0'
             this.logger.debug(`Trying display ${displaySpec}`)
-            let xHost = displaySpec.split(':')[0]
-            let xDisplay = parseInt(displaySpec.split(':')[1].split('.')[0] || '0')
-            let xPort = xDisplay < 100 ? xDisplay + 6000 : xDisplay
+            const xHost = displaySpec.split(':')[0]
+            const xDisplay = parseInt(displaySpec.split(':')[1].split('.')[0] || '0')
+            const xPort = xDisplay < 100 ? xDisplay + 6000 : xDisplay
 
             const socket = displaySpec.startsWith('/') ? createConnection(displaySpec) : new Socket()
             if (!displaySpec.startsWith('/')) {
                 socket.connect(xPort, xHost)
             }
             socket.on('error', e => {
-                this.emitServiceMessage(colors.bgRed.black(' X ') + ` Could not connect to the X server ${xHost}:${xPort}: ${e}`)
+                // eslint-disable-next-line @typescript-eslint/no-base-to-string
+                this.emitServiceMessage(colors.bgRed.black(' X ') + ` Could not connect to the X server: ${e}`)
+                this.emitServiceMessage(`    Terminus tried to connect to ${xHost}:${xPort} based on the DISPLAY environment var (${displaySpec})`)
+                if (process.platform === 'win32') {
+                    this.emitServiceMessage('    To use X forwarding, you need a local X server, e.g.:')
+                    this.emitServiceMessage('    * VcXsrv: https://sourceforge.net/projects/vcxsrv/')
+                    this.emitServiceMessage('    * Xming: https://sourceforge.net/projects/xming/')
+                }
                 reject()
             })
             socket.on('connect', () => {
@@ -219,24 +276,25 @@ export class SSHSession extends BaseSession {
 
     emitServiceMessage (msg: string): void {
         this.serviceMessage.next(msg)
-        this.logger.info(msg)
+        this.logger.info(stripAnsi(msg))
     }
 
     async addPortForward (fw: ForwardedPort): Promise<void> {
-        if (fw.type === PortForwardType.Local) {
-            await fw.startLocalListener((socket: Socket) => {
+        if (fw.type === PortForwardType.Local || fw.type === PortForwardType.Dynamic) {
+            await fw.startLocalListener((accept, reject, sourceAddress, sourcePort, targetAddress, targetPort) => {
                 this.logger.info(`New connection on ${fw}`)
                 this.ssh.forwardOut(
-                    socket.remoteAddress || '127.0.0.1',
-                    socket.remotePort || 0,
-                    fw.targetAddress,
-                    fw.targetPort,
+                    sourceAddress ?? '127.0.0.1',
+                    sourcePort ?? 0,
+                    targetAddress,
+                    targetPort,
                     (err, stream) => {
                         if (err) {
-                            this.emitServiceMessage(colors.bgRed.black(' X ') + ` Remote has rejected the forwaded connection via ${fw}: ${err}`)
-                            socket.destroy()
-                            return
+                            // eslint-disable-next-line @typescript-eslint/no-base-to-string
+                            this.emitServiceMessage(colors.bgRed.black(' X ') + ` Remote has rejected the forwarded connection to ${targetAddress}:${targetPort} via ${fw}: ${err}`)
+                            return reject()
                         }
+                        const socket = accept()
                         stream.pipe(socket)
                         socket.pipe(stream)
                         stream.on('close', () => {
@@ -248,7 +306,7 @@ export class SSHSession extends BaseSession {
                     }
                 )
             }).then(() => {
-                this.emitServiceMessage(colors.bgGreen.black(' -> ') + ` Forwaded ${fw}`)
+                this.emitServiceMessage(colors.bgGreen.black(' -> ') + ` Forwarded ${fw}`)
                 this.forwardedPorts.push(fw)
             }).catch(e => {
                 this.emitServiceMessage(colors.bgRed.black(' X ') + ` Failed to forward port ${fw}: ${e}`)
@@ -259,19 +317,20 @@ export class SSHSession extends BaseSession {
             await new Promise((resolve, reject) => {
                 this.ssh.forwardIn(fw.host, fw.port, err => {
                     if (err) {
+                        // eslint-disable-next-line @typescript-eslint/no-base-to-string
                         this.emitServiceMessage(colors.bgRed.black(' X ') + ` Remote rejected port forwarding for ${fw}: ${err}`)
                         return reject(err)
                     }
                     resolve()
                 })
             })
-            this.emitServiceMessage(colors.bgGreen.black(' <- ') + ` Forwaded ${fw}`)
+            this.emitServiceMessage(colors.bgGreen.black(' <- ') + ` Forwarded ${fw}`)
             this.forwardedPorts.push(fw)
         }
     }
 
     async removePortForward (fw: ForwardedPort): Promise<void> {
-        if (fw.type === PortForwardType.Local) {
+        if (fw.type === PortForwardType.Local || fw.type === PortForwardType.Dynamic) {
             fw.stopLocalListener()
             this.forwardedPorts = this.forwardedPorts.filter(x => x !== fw)
         }
@@ -290,13 +349,13 @@ export class SSHSession extends BaseSession {
 
     write (data: Buffer): void {
         if (this.shell) {
-            this.shell.write(data.toString())
+            this.shell.write(data)
         }
     }
 
     kill (signal?: string): void {
         if (this.shell) {
-            this.shell.signal(signal || 'TERM')
+            this.shell.signal(signal ?? 'TERM')
         }
     }
 
@@ -311,6 +370,10 @@ export class SSHSession extends BaseSession {
 
     async gracefullyKillProcess (): Promise<void> {
         this.kill('TERM')
+    }
+
+    supportsWorkingDirectory (): boolean {
+        return true
     }
 
     async getWorkingDirectory (): Promise<string|null> {
@@ -334,7 +397,7 @@ export class SSHSession extends BaseSession {
             for (const script of this.scripts) {
                 if (!script.expect) {
                     console.log('Executing script:', script.send)
-                    this.shell.write(script.send + '\n')
+                    this.shell!.write(script.send + '\n')
                     this.scripts = this.scripts.filter(x => x !== script)
                 } else {
                     break
@@ -348,3 +411,9 @@ export interface SSHConnectionGroup {
     name: string
     connections: SSHConnection[]
 }
+
+export const ALGORITHM_BLACKLIST = [
+    // cause native crashes in node crypto, use EC instead
+    'diffie-hellman-group-exchange-sha256',
+    'diffie-hellman-group-exchange-sha1',
+]

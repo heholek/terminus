@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/explicit-module-boundary-types */
 import { Component } from '@angular/core'
 import { NgbModal, NgbActiveModal } from '@ng-bootstrap/ng-bootstrap'
-import { ElectronService, HostAppService } from 'terminus-core'
+import { ElectronService, HostAppService, ConfigService } from 'terminus-core'
 import { PasswordStorageService } from '../services/passwordStorage.service'
-import { SSHConnection, LoginScript, SSHAlgorithmType } from '../api'
+import { SSHConnection, LoginScript, SSHAlgorithmType, ALGORITHM_BLACKLIST } from '../api'
 import { PromptModalComponent } from './promptModal.component'
 import { ALGORITHMS } from 'ssh2-streams/lib/constants'
 
@@ -15,11 +15,12 @@ export class EditConnectionModalComponent {
     connection: SSHConnection
     hasSavedPassword: boolean
 
-    supportedAlgorithms: {[id: string]: string[]} = {}
-    defaultAlgorithms: {[id: string]: string[]} = {}
-    algorithms: {[id: string]: {[a: string]: boolean}} = {}
+    supportedAlgorithms: Record<string, string> = {}
+    defaultAlgorithms: Record<string, string[]> = {}
+    algorithms: Record<string, Record<string, boolean>> = {}
 
     constructor (
+        public config: ConfigService,
         private modalInstance: NgbActiveModal,
         private electron: ElectronService,
         private hostApp: HostAppService,
@@ -39,17 +40,19 @@ export class EditConnectionModalComponent {
                 [SSHAlgorithmType.CIPHER]: 'CIPHER',
                 [SSHAlgorithmType.HMAC]: 'HMAC',
             }[k]
-            this.supportedAlgorithms[k] = ALGORITHMS[supportedAlg]
-            this.defaultAlgorithms[k] = ALGORITHMS[defaultAlg]
+            this.supportedAlgorithms[k] = ALGORITHMS[supportedAlg].filter(x => !ALGORITHM_BLACKLIST.includes(x))
+            this.defaultAlgorithms[k] = ALGORITHMS[defaultAlg].filter(x => !ALGORITHM_BLACKLIST.includes(x))
         }
     }
 
     async ngOnInit () {
         this.hasSavedPassword = !!await this.passwordStorage.loadPassword(this.connection)
-        this.connection.algorithms = this.connection.algorithms || {}
-        this.connection.scripts = this.connection.scripts || []
+        this.connection.algorithms = this.connection.algorithms ?? {}
+        this.connection.scripts = this.connection.scripts ?? []
+        this.connection.auth = this.connection.auth ?? null
 
         for (const k of Object.values(SSHAlgorithmType)) {
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             if (!this.connection.algorithms[k]) {
                 this.connection.algorithms[k] = this.defaultAlgorithms[k]
             }
@@ -96,8 +99,8 @@ export class EditConnectionModalComponent {
     save () {
         for (const k of Object.values(SSHAlgorithmType)) {
             this.connection.algorithms![k] = Object.entries(this.algorithms[k])
-                .filter(([_k, v]) => !!v)
-                .map(([k, _v]) => k)
+                .filter(([_, v]) => !!v)
+                .map(([key, _]) => key)
         }
         this.modalInstance.close(this.connection)
     }

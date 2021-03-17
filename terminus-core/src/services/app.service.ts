@@ -8,6 +8,7 @@ import { BaseTabComponent } from '../components/baseTab.component'
 import { SplitTabComponent } from '../components/splitTab.component'
 import { SelectorModalComponent } from '../components/selectorModal.component'
 import { SelectorOption } from '../api/selector'
+import { RecoveryToken } from '../api/tabRecovery'
 
 import { ConfigService } from './config.service'
 import { HostAppService } from './hostApp.service'
@@ -45,12 +46,13 @@ class CompletionObserver {
 export class AppService {
     tabs: BaseTabComponent[] = []
 
-    get activeTab (): BaseTabComponent { return this._activeTab }
+    get activeTab (): BaseTabComponent|null { return this._activeTab ?? null }
 
     private lastTabIndex = 0
-    private _activeTab: BaseTabComponent
+    private _activeTab: BaseTabComponent | null = null
+    private closedTabsStack: RecoveryToken[] = []
 
-    private activeTabChange = new Subject<BaseTabComponent>()
+    private activeTabChange = new Subject<BaseTabComponent|null>()
     private tabsChanged = new Subject<void>()
     private tabOpened = new Subject<BaseTabComponent>()
     private tabClosed = new Subject<BaseTabComponent>()
@@ -58,7 +60,7 @@ export class AppService {
 
     private completionObservers = new Map<BaseTabComponent, CompletionObserver>()
 
-    get activeTabChange$ (): Observable<BaseTabComponent> { return this.activeTabChange }
+    get activeTabChange$ (): Observable<BaseTabComponent|null> { return this.activeTabChange }
     get tabOpened$ (): Observable<BaseTabComponent> { return this.tabOpened }
     get tabsChanged$ (): Observable<void> { return this.tabsChanged }
     get tabClosed$ (): Observable<BaseTabComponent> { return this.tabClosed }
@@ -67,39 +69,42 @@ export class AppService {
     get ready$ (): Observable<void> { return this.ready }
 
     /** @hidden */
-    constructor (
+    private constructor (
         private config: ConfigService,
         private hostApp: HostAppService,
         private tabRecovery: TabRecoveryService,
         private tabsService: TabsService,
         private ngbModal: NgbModal,
     ) {
-        if (hostApp.getWindow().id === 1) {
-            if (config.store.terminal.recoverTabs) {
-                this.tabRecovery.recoverTabs().then(tabs => {
-                    for (const tab of tabs) {
-                        this.openNewTabRaw(tab.type, tab.options)
-                    }
-                    this.startTabStorage()
-                })
-            } else {
-                /** Continue to store the tabs even if the setting is currently off */
-                this.startTabStorage()
-            }
-        }
-
-        hostApp.windowFocused$.subscribe(() => {
-            this._activeTab?.emitFocused()
-        })
-    }
-
-    startTabStorage (): void {
         this.tabsChanged$.subscribe(() => {
             this.tabRecovery.saveTabs(this.tabs)
         })
         setInterval(() => {
             this.tabRecovery.saveTabs(this.tabs)
         }, 30000)
+
+        if (hostApp.getWindow().id === 1) {
+            if (config.store.terminal.recoverTabs) {
+                this.tabRecovery.recoverTabs().then(tabs => {
+                    for (const tab of tabs) {
+                        this.openNewTabRaw(tab.type, tab.options)
+                    }
+                    this.tabRecovery.enabled = true
+                })
+            } else {
+                /** Continue to store the tabs even if the setting is currently off */
+                this.tabRecovery.enabled = true
+            }
+        }
+
+        hostApp.windowFocused$.subscribe(() => this._activeTab?.emitFocused())
+
+        this.tabClosed$.subscribe(async tab => {
+            const token = await tabRecovery.getFullRecoveryToken(tab)
+            if (token) {
+                this.closedTabsStack.push(token)
+            }
+        })
     }
 
     addTabRaw (tab: BaseTabComponent, index: number|null = null): void {
@@ -163,12 +168,29 @@ export class AppService {
         return tab
     }
 
-    selectTab (tab: BaseTabComponent): void {
-        if (this._activeTab === tab) {
+    async reopenLastTab (): Promise<BaseTabComponent|null> {
+        const token = this.closedTabsStack.pop()
+        if (token) {
+            const recoveredTab = await this.tabRecovery.recoverTab(token)
+            if (recoveredTab) {
+                const tab = this.tabsService.create(recoveredTab.type, recoveredTab.options)
+                if (this.activeTab) {
+                    this.addTabRaw(tab, this.tabs.indexOf(this.activeTab) + 1)
+                } else {
+                    this.addTabRaw(tab)
+                }
+                return tab
+            }
+        }
+        return null
+    }
+
+    selectTab (tab: BaseTabComponent|null): void {
+        if (tab && this._activeTab === tab) {
             this._activeTab.emitFocused()
             return
         }
-        if (this.tabs.includes(this._activeTab)) {
+        if (this._activeTab && this.tabs.includes(this._activeTab)) {
             this.lastTabIndex = this.tabs.indexOf(this._activeTab)
         } else {
             this.lastTabIndex = 0
@@ -179,12 +201,10 @@ export class AppService {
         }
         this._activeTab = tab
         this.activeTabChange.next(tab)
-        if (this._activeTab) {
-            setImmediate(() => {
-                this._activeTab.emitFocused()
-            })
-            this.hostApp.setTitle(this._activeTab.title)
-        }
+        setImmediate(() => {
+            this._activeTab?.emitFocused()
+        })
+        this.hostApp.setTitle(this._activeTab?.title)
     }
 
     getParentTab (tab: BaseTabComponent): SplitTabComponent|null {
@@ -207,6 +227,9 @@ export class AppService {
     }
 
     nextTab (): void {
+        if (!this._activeTab) {
+            return
+        }
         if (this.tabs.length > 1) {
             const tabIndex = this.tabs.indexOf(this._activeTab)
             if (tabIndex < this.tabs.length - 1) {
@@ -218,6 +241,9 @@ export class AppService {
     }
 
     previousTab (): void {
+        if (!this._activeTab) {
+            return
+        }
         if (this.tabs.length > 1) {
             const tabIndex = this.tabs.indexOf(this._activeTab)
             if (tabIndex > 0) {
@@ -229,23 +255,29 @@ export class AppService {
     }
 
     moveSelectedTabLeft (): void {
+        if (!this._activeTab) {
+            return
+        }
         if (this.tabs.length > 1) {
             const tabIndex = this.tabs.indexOf(this._activeTab)
             if (tabIndex > 0) {
                 this.swapTabs(this._activeTab, this.tabs[tabIndex - 1])
             } else if (this.config.store.appearance.cycleTabs) {
-                this.swapTabs(this._activeTab, this.tabs[this.tabs.length - 1])
+                this.tabs.push(this.tabs.shift()!)
             }
         }
     }
 
     moveSelectedTabRight (): void {
+        if (!this._activeTab) {
+            return
+        }
         if (this.tabs.length > 1) {
             const tabIndex = this.tabs.indexOf(this._activeTab)
             if (tabIndex < this.tabs.length - 1) {
                 this.swapTabs(this._activeTab, this.tabs[tabIndex + 1])
             } else if (this.config.store.appearance.cycleTabs) {
-                this.swapTabs(this._activeTab, this.tabs[0])
+                this.tabs.unshift(this.tabs.pop()!)
             }
         }
     }
@@ -293,6 +325,16 @@ export class AppService {
             tab.destroy(true)
         }
         return true
+    }
+
+    async closeWindow (): Promise<void> {
+        this.tabRecovery.enabled = false
+        await this.tabRecovery.saveTabs(this.tabs)
+        if (await this.closeAllTabs()) {
+            this.hostApp.closeWindow()
+        } else {
+            this.tabRecovery.enabled = true
+        }
     }
 
     /** @hidden */

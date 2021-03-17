@@ -1,11 +1,13 @@
 import { Injectable } from '@angular/core'
 import { ElectronService } from './electron.service'
-import * as winston from 'winston'
+import type * as winston from 'winston'
 import * as fs from 'fs'
 import * as path from 'path'
 
 const initializeWinston = (electron: ElectronService) => {
     const logDirectory = electron.app.getPath('userData')
+    // eslint-disable-next-line
+    const winston = require('winston')
 
     if (!fs.existsSync(logDirectory)) {
         fs.mkdirSync(logDirectory)
@@ -28,7 +30,7 @@ const initializeWinston = (electron: ElectronService) => {
 
 export class Logger {
     constructor (
-        private winstonLogger: any,
+        private winstonLogger: winston.Logger,
         private name: string,
     ) {}
 
@@ -54,19 +56,21 @@ export class Logger {
 
     private doLog (level: string, ...args: any[]): void {
         console[level](`%c[${this.name}]`, 'color: #aaa', ...args)
-        if (this.winstonLogger) {
-            this.winstonLogger[level](...args)
-        }
+        this.winstonLogger[level](...args)
     }
 }
 
 @Injectable({ providedIn: 'root' })
 export class LogService {
-    private log: any
+    private log: winston.Logger
 
     /** @hidden */
-    constructor (electron: ElectronService) {
-        this.log = initializeWinston(electron)
+    private constructor (electron: ElectronService) {
+        if (!process.env.XWEB) {
+            this.log = initializeWinston(electron)
+        } else {
+            this.log = console as any
+        }
     }
 
     create (name: string): Logger {
