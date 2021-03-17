@@ -15,6 +15,11 @@ export interface BaseTabProcess {
  */
 export abstract class BaseTabComponent {
     /**
+     * Parent tab (usually a SplitTabComponent)
+     */
+    parent: BaseTabComponent|null = null
+
+    /**
      * Current tab title
      */
     title: string
@@ -63,7 +68,7 @@ export abstract class BaseTabComponent {
     get destroyed$ (): Observable<void> { return this.destroyed }
     get recoveryStateChangedHint$ (): Observable<void> { return this.recoveryStateChangedHint }
 
-    constructor () {
+    protected constructor () {
         this.focused$.subscribe(() => {
             this.hasFocus = true
         })

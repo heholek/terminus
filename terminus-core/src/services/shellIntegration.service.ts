@@ -33,7 +33,7 @@ export class ShellIntegrationService {
             command: 'paste "%V"',
         },
     ]
-    constructor (
+    private constructor (
         private electron: ElectronService,
         private hostApp: HostAppService,
     ) {
@@ -44,7 +44,7 @@ export class ShellIntegrationService {
                 'extras',
                 'automator-workflows',
             )
-            this.automatorWorkflowsDestination = path.join(process.env.HOME as string, 'Library', 'Services')
+            this.automatorWorkflowsDestination = path.join(process.env.HOME!, 'Library', 'Services')
         }
         this.updatePaths()
     }
@@ -59,7 +59,7 @@ export class ShellIntegrationService {
     }
 
     async install (): Promise<void> {
-        const exe: string = process.env.PORTABLE_EXECUTABLE_FILE || this.electron.app.getPath('exe')
+        const exe: string = process.env.PORTABLE_EXECUTABLE_FILE ?? this.electron.app.getPath('exe')
         if (this.hostApp.platform === Platform.macOS) {
             for (const wf of this.automatorWorkflows) {
                 await exec(`cp -r "${this.automatorWorkflowsLocation}/${wf}" "${this.automatorWorkflowsDestination}"`)
@@ -73,10 +73,10 @@ export class ShellIntegrationService {
                 wnr.setRegistryValue(wnr.HK.CU, registryKey.path + '\\command', '', wnr.REG.SZ, exe + ' ' + registryKey.command)
             }
 
-            if(wnr.getRegistryKey(wnr.HK.CU, 'Software\\Classes\\Directory\\Background\\shell\\Open Terminus here')) {
+            if (wnr.getRegistryKey(wnr.HK.CU, 'Software\\Classes\\Directory\\Background\\shell\\Open Terminus here')) {
                 wnr.deleteRegistryKey(wnr.HK.CU, 'Software\\Classes\\Directory\\Background\\shell\\Open Terminus here')
             }
-            if(wnr.getRegistryKey(wnr.HK.CU, 'Software\\Classes\\*\\shell\\Paste path into Terminus')) {
+            if (wnr.getRegistryKey(wnr.HK.CU, 'Software\\Classes\\*\\shell\\Paste path into Terminus')) {
                 wnr.deleteRegistryKey(wnr.HK.CU, 'Software\\Classes\\*\\shell\\Paste path into Terminus')
             }
         }

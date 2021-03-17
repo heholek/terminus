@@ -2,7 +2,6 @@
     strong Error in {{erroredPlugin}}:
     pre {{errorMessage}}
 
-
 .d-flex
     h3.mb-1 Installed
     button.btn.btn-outline-secondary.btn-sm.ml-auto((click)='openPluginsFolder()')
@@ -11,42 +10,36 @@
 
 .list-group.list-group-flush.mt-2
     .list-group-item.d-flex.align-items-center(*ngFor='let plugin of pluginManager.installedPlugins')
+        toggle(
+            [ngModel]='isPluginEnabled(plugin)',
+            (ngModelChange)='togglePlugin(plugin)',
+            [disabled]='!canDisablePlugin(plugin)'
+        )
+
         .mr-auto.d-flex.flex-column
             div
                 strong {{plugin.name}}
                 small.text-muted.ml-1(*ngIf='!plugin.isBuiltin') {{plugin.version}} / {{plugin.author}}
-                small.text-warning.ml-1(*ngIf='config.store.pluginBlacklist.includes(plugin.name)') Disabled
+                small.text-warning.ml-1(*ngIf='!isPluginEnabled(plugin)') Disabled
             a.text-muted.mb-0((click)='showPluginInfo(plugin)')
                 small {{plugin.description}}
 
         button.btn.btn-primary.ml-2(
             *ngIf='knownUpgrades[plugin.name]',
             (click)='upgradePlugin(plugin)',
-            [disabled]='busy[plugin.name] != undefined'
+            [disabled]='busy.has(plugin.name)'
         )
-            i.fas.fa-fw.fa-arrow-up(*ngIf='busy[plugin.name] != BusyState.Installing')
-            i.fas.fa-fw.fa-circle-notch.fa-spin(*ngIf='busy[plugin.name] == BusyState.Installing')
+            i.fas.fa-fw.fa-arrow-up(*ngIf='busy.get(plugin.name) != BusyState.Installing')
+            i.fas.fa-fw.fa-circle-notch.fa-spin(*ngIf='busy.get(plugin.name) == BusyState.Installing')
             span Upgrade ({{knownUpgrades[plugin.name].version}})
-
-        button.btn.btn-link.text-primary.ml-2(
-            *ngIf='config.store.pluginBlacklist.includes(plugin.name)',
-            (click)='enablePlugin(plugin)'
-        )
-            i.fas.fa-fw.fa-play
-
-        button.btn.btn-link.ml-2(
-            *ngIf='!config.store.pluginBlacklist.includes(plugin.name)',
-            (click)='disablePlugin(plugin)'
-        )
-            i.fas.fa-fw.fa-pause
 
         button.btn.btn-link.text-danger.ml-2(
             (click)='uninstallPlugin(plugin)',
             *ngIf='!plugin.isBuiltin',
-            [disabled]='busy[plugin.name] != undefined'
+            [disabled]='busy.has(plugin.name)'
         )
-            i.fas.fa-fw.fa-trash(*ngIf='busy[plugin.name] != BusyState.Uninstalling')
-            i.fas.fa-fw.fa-circle-notch.fa-spin(*ngIf='busy[plugin.name] == BusyState.Uninstalling')
+            i.fas.fa-fw.fa-trash(*ngIf='busy.get(plugin.name) != BusyState.Uninstalling')
+            i.fas.fa-fw.fa-circle-notch.fa-spin(*ngIf='busy.get(plugin.name) == BusyState.Uninstalling')
 
 div
     h3.mt-4 Available
@@ -69,10 +62,10 @@ div
             .list-group-item.d-flex.align-items-center(*ngIf='!isAlreadyInstalled(plugin)')
                 button.btn.btn-primary.mr-3(
                     (click)='installPlugin(plugin)',
-                    [disabled]='busy[plugin.name] != undefined'
+                    [disabled]='busy.has(plugin.name)'
                 )
-                    i.fas.fa-fw.fa-download(*ngIf='busy[plugin.name] != BusyState.Installing')
-                    i.fas.fa-fw.fa-circle-notch.fa-spin(*ngIf='busy[plugin.name] == BusyState.Installing')
+                    i.fas.fa-fw.fa-download(*ngIf='busy.get(plugin.name) != BusyState.Installing')
+                    i.fas.fa-fw.fa-circle-notch.fa-spin(*ngIf='busy.get(plugin.name) == BusyState.Installing')
 
                 div((click)='showPluginInfo(plugin)')
                     div

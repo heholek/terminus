@@ -29,7 +29,7 @@ body {
     background: $body-bg;
 
     &.vibrant {
-        background: rgba(0,0,0,.4);
+        background: rgba(0,0,0,.65);
     }
 }
 
@@ -66,7 +66,9 @@ app-root  {
                         border: none;
                         transition: 0.25s all;
 
-                        &:hover { background: $button-hover-bg !important; }
+                        right: 5px;
+
+                        &:hover { background: $button-active-bg !important; }
                         &:active { background: $button-active-bg !important; }
                     }
 
@@ -246,7 +248,7 @@ ngb-tabset .tab-content {
 }
 
 .list-group-item {
-    transition: 0.25s background;
+    transition: 0.0625s background;
 
     i + * {
         margin-left: 10px;
@@ -259,6 +261,29 @@ ngb-tabset .tab-content {
 
     &:not(:last-child) {
         border-bottom: none;
+    }
+}
+
+
+.list-group-light {
+    .list-group-item {
+        background: transparent;
+        border: none;
+        border-top: 1px solid rgba(255, 255, 255, .1);
+
+        &:not(.combi) {
+            padding: $list-group-item-padding-y $list-group-item-padding-x;
+        }
+
+        &:first-child {
+            border-top: none;
+        }
+
+        &.list-group-item-action {
+            &:hover, &.active {
+                background: $list-group-hover-bg;
+            }
+        }
     }
 }
 
@@ -335,6 +360,7 @@ search-panel {
 .btn-secondary:not(:disabled):not(.disabled) {
     &.active, &:active {
         background: #191e23;
+        align-items: center;
     }
 }
 
@@ -391,4 +417,8 @@ search-panel {
         color: $nav-tabs-link-active-color;
         border-color: $nav-tabs-link-active-border-color;
     }
+}
+
+hr {
+    border-color: $list-group-border-color;
 }

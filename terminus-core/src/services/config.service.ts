@@ -97,22 +97,19 @@ export class ConfigService {
     private changed = new Subject<void>()
     private _store: any
     private defaults: any
-    private servicesCache: { [id: string]: Function[] }|null = null
+    private servicesCache: Record<string, Function[]>|null = null // eslint-disable-line @typescript-eslint/ban-types
 
     get changed$ (): Observable<void> { return this.changed }
 
     /** @hidden */
-    constructor (
+    private constructor (
         electron: ElectronService,
         private hostApp: HostAppService,
         @Inject(ConfigProvider) configProviders: ConfigProvider[],
     ) {
         this.path = path.join(electron.app.getPath('userData'), 'config.yaml')
         this.defaults = configProviders.map(provider => {
-            let defaults = {}
-            if (provider.platformDefaults) {
-                defaults = configMerge(defaults, provider.platformDefaults[hostApp.platform] || {})
-            }
+            let defaults = provider.platformDefaults[hostApp.platform] || {}
             if (provider.defaults) {
                 defaults = configMerge(defaults, provider.defaults)
             }
@@ -147,7 +144,7 @@ export class ConfigService {
 
     load (): void {
         if (fs.existsSync(this.path)) {
-            this._store = yaml.safeLoad(fs.readFileSync(this.path, 'utf8'))
+            this._store = yaml.load(fs.readFileSync(this.path, 'utf8'))
         } else {
             this._store = {}
         }
@@ -155,23 +152,25 @@ export class ConfigService {
     }
 
     save (): void {
-        fs.writeFileSync(this.path, yaml.safeDump(this._store), 'utf8')
+        // Scrub undefined values
+        this._store = JSON.parse(JSON.stringify(this._store))
+        fs.writeFileSync(this.path, yaml.dump(this._store), 'utf8')
         this.emitChange()
-        this.hostApp.broadcastConfigChange()
+        this.hostApp.broadcastConfigChange(JSON.parse(JSON.stringify(this.store)))
     }
 
     /**
      * Reads config YAML as string
      */
     readRaw (): string {
-        return yaml.safeDump(this._store)
+        return yaml.dump(this._store)
     }
 
     /**
      * Writes config YAML as string
      */
     writeRaw (data: string): void {
-        this._store = yaml.safeLoad(data)
+        this._store = yaml.load(data)
         this.save()
         this.load()
         this.emitChange()
@@ -187,15 +186,15 @@ export class ConfigService {
      *
      * @typeparam T Base provider type
      */
-    enabledServices<T extends object> (services: T[]): T[] {
+    enabledServices<T extends object> (services: T[]): T[] { // eslint-disable-line @typescript-eslint/ban-types
         if (!this.servicesCache) {
             this.servicesCache = {}
             const ngModule = window['rootModule'].ɵinj
             for (const imp of ngModule.imports) {
-                const module = imp['ngModule'] || imp
+                const module = imp.ngModule || imp
                 if (module.ɵinj?.providers) {
-                    this.servicesCache[module['pluginName']] = module.ɵinj.providers.map(provider => {
-                        return provider['useClass'] || provider
+                    this.servicesCache[module.pluginName] = module.ɵinj.providers.map(provider => {
+                        return provider.useClass || provider
                     })
                 }
             }

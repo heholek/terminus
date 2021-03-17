@@ -5,13 +5,15 @@ export class SSHConfigProvider extends ConfigProvider {
     defaults = {
         ssh: {
             connections: [],
-            options: {
-            },
+            recentConnections: [],
+            warnOnClose: false,
+            winSCPPath: null,
         },
         hotkeys: {
             ssh: [
                 'Alt-S',
             ],
+            'restart-ssh-session': [],
         },
     }
 

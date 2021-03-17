@@ -4,6 +4,7 @@ import { ConfigProvider, Platform } from 'terminus-core'
 export class TerminalConfigProvider extends ConfigProvider {
     defaults = {
         hotkeys: {
+            'copy-current-path': [],
             shell: {
                 __nonStructural: true,
             },
@@ -23,6 +24,8 @@ export class TerminalConfigProvider extends ConfigProvider {
             ligatures: false,
             cursor: 'block',
             cursorBlink: true,
+            hideTabIndex: false,
+            hideCloseButton: false,
             customShell: '',
             rightClick: 'menu',
             pasteOnMiddleClick: true,
@@ -31,11 +34,13 @@ export class TerminalConfigProvider extends ConfigProvider {
             workingDirectory: '',
             alwaysUseWorkingDirectory: false,
             altIsMeta: false,
+            wordSeparator: ' ()[]{}\'"',
             colorScheme: {
                 __nonStructural: true,
                 name: 'Material',
                 foreground: '#eceff1',
                 background: 'rgba(38, 50, 56, 1)',
+                selection: null,
                 cursor: '#FFCC00',
                 colors: [
                     '#000000',
@@ -61,6 +66,15 @@ export class TerminalConfigProvider extends ConfigProvider {
             profiles: [],
             useConPTY: true,
             recoverTabs: true,
+            warnOnMultilinePaste: true,
+            showDefaultProfiles: true,
+            searchRegexAlwaysEnabled: false,
+            searchOptions: {
+                regex: false,
+                wholeWord: false,
+                caseSensitive: false,
+            },
+            detectProgress: true,
         },
     }
 
@@ -95,7 +109,6 @@ export class TerminalConfigProvider extends ConfigProvider {
                 ],
                 'new-tab': [
                     '⌘-T',
-                    '⌘-N',
                 ],
                 home: ['⌘-Left', 'Home'],
                 end: ['⌘-Right', 'End'],
@@ -105,6 +118,9 @@ export class TerminalConfigProvider extends ConfigProvider {
                 'delete-next-word': ['⌥-Delete'],
                 search: [
                     '⌘-F',
+                ],
+                'pane-focus-all': [
+                    '⌘-Shift-I',
                 ],
             },
         },
@@ -149,6 +165,9 @@ export class TerminalConfigProvider extends ConfigProvider {
                 search: [
                     'Ctrl-Shift-F',
                 ],
+                'pane-focus-all': [
+                    'Ctrl-Shift-I',
+                ],
             },
         },
         [Platform.Linux]: {
@@ -188,6 +207,9 @@ export class TerminalConfigProvider extends ConfigProvider {
                 'delete-next-word': ['Ctrl-Delete'],
                 search: [
                     'Ctrl-Shift-F',
+                ],
+                'pane-focus-all': [
+                    'Ctrl-Shift-I',
                 ],
             },
         },

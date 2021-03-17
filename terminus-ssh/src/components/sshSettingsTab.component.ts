@@ -14,7 +14,7 @@ import { PromptModalComponent } from './promptModal.component'
 export class SSHSettingsTabComponent {
     connections: SSHConnection[]
     childGroups: SSHConnectionGroup[]
-    groupCollapsed: {[id: string]: boolean} = {}
+    groupCollapsed: Record<string, boolean> = {}
 
     constructor (
         public config: ConfigService,
@@ -38,6 +38,19 @@ export class SSHSettingsTabComponent {
 
         const modal = this.ngbModal.open(EditConnectionModalComponent)
         modal.componentInstance.connection = connection
+        modal.result.then(result => {
+            this.connections.push(result)
+            this.config.store.ssh.connections = this.connections
+            this.config.save()
+            this.refresh()
+        })
+    }
+
+    copyConnection (connection: SSHConnection) {
+        const modal = this.ngbModal.open(EditConnectionModalComponent)
+        modal.componentInstance.connection = Object.assign({
+            name: `${name} Copy`,
+        }, connection)
         modal.result.then(result => {
             this.connections.push(result)
             this.config.store.ssh.connections = this.connections
@@ -96,7 +109,7 @@ export class SSHSettingsTabComponent {
             this.hostApp.getWindow(),
             {
                 type: 'warning',
-                message: `Delete "${group}"?`,
+                message: `Delete "${group.name}"?`,
                 buttons: ['Keep', 'Delete'],
                 defaultId: 1,
             }
@@ -114,14 +127,14 @@ export class SSHSettingsTabComponent {
         this.childGroups = []
 
         for (const connection of this.connections) {
-            connection.group = connection.group || null
+            connection.group = connection.group ?? null
             let group = this.childGroups.find(x => x.name === connection.group)
             if (!group) {
                 group = {
                     name: connection.group!,
                     connections: [],
                 }
-                this.childGroups.push(group!)
+                this.childGroups.push(group)
             }
             group.connections.push(connection)
         }

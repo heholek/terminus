@@ -3,13 +3,13 @@ import * as path from 'path'
 const nodeModule = require('module') // eslint-disable-line @typescript-eslint/no-var-requires
 const nodeRequire = (global as any).require
 
-function normalizePath (path: string): string {
+function normalizePath (p: string): string {
     const cygwinPrefix = '/cygdrive/'
-    if (path.startsWith(cygwinPrefix)) {
-        path = path.substring(cygwinPrefix.length).replace('/', '\\')
-        path = path[0] + ':' + path.substring(1)
+    if (p.startsWith(cygwinPrefix)) {
+        p = p.substring(cygwinPrefix.length).replace('/', '\\')
+        p = p[0] + ':' + p.substring(1)
     }
-    return path
+    return p
 }
 
 global['module'].paths.map((x: string) => nodeModule.globalPaths.push(normalizePath(x)))
@@ -63,7 +63,6 @@ const builtinModules = [
     'ngx-toastr',
     'rxjs',
     'rxjs/operators',
-    'rxjs-compat/Subject',
     'terminus-core',
     'terminus-settings',
     'terminus-terminal',
@@ -83,7 +82,7 @@ const originalRequire = (global as any).require
     if (cachedBuiltinModules[query]) {
         return cachedBuiltinModules[query]
     }
-    return originalRequire.apply(this, arguments)
+    return originalRequire.apply(this, [query])
 }
 
 const originalModuleRequire = nodeModule.prototype.require
@@ -173,8 +172,8 @@ export async function loadPlugins (foundPlugins: PluginInfo[], progress: Progres
             console.time(label)
             const packageModule = nodeRequire(foundPlugin.path)
             const pluginModule = packageModule.default.forRoot ? packageModule.default.forRoot() : packageModule.default
-            pluginModule['pluginName'] = foundPlugin.name
-            pluginModule['bootstrap'] = packageModule.bootstrap
+            pluginModule.pluginName = foundPlugin.name
+            pluginModule.bootstrap = packageModule.bootstrap
             plugins.push(pluginModule)
             console.timeEnd(label)
             await new Promise(x => setTimeout(x, 50))

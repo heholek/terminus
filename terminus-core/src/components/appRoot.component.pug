@@ -1,13 +1,17 @@
 title-bar(
   *ngIf='!hostApp.isFullScreen && config.store.appearance.frame == "full" && config.store.appearance.dock == "off"',
-  [class.inset]='hostApp.platform == Platform.macOS'
+  [class.inset]='hostApp.platform == Platform.macOS && !hostApp.isFullScreen'
 )
 
 .content(
-    [class.tabs-on-top]='config.store.appearance.tabsLocation == "top"'
+    [class.tabs-on-top]='config.store.appearance.tabsLocation == "top" || config.store.appearance.tabsLocation == "left"',
+    [class.tabs-on-side]='hasVerticalTabs()',
 )
     .tab-bar
-        .inset.background(*ngIf='hostApp.platform == Platform.macOS && config.store.appearance.frame == "thin" && config.store.appearance.tabsLocation == "top"')
+        .inset.background(*ngIf='hostApp.platform == Platform.macOS \
+        && !hostApp.isFullScreen \
+        && config.store.appearance.frame == "thin" \
+        && (config.store.appearance.tabsLocation == "top" || config.store.appearance.tabsLocation == "left")')
         .tabs(
             dnd-sortable-container,
             [sortableData]='app.tabs',
@@ -18,12 +22,12 @@ title-bar(
                 [sortableIndex]='idx',
                 (onDragStart)='onTabDragStart()',
                 (onDragEnd)='onTabDragEnd()',
-
                 [index]='idx',
                 [tab]='tab',
                 [active]='tab == app.activeTab',
                 [hasActivity]='tab.activity$|async',
                 @animateTab,
+                [@.disabled]='hasVerticalTabs()',
                 (click)='app.selectTab(tab)',
                 [class.fully-draggable]='hostApp.platform != Platform.macOS',
                 [class.drag-region]='hostApp.platform == Platform.macOS && !tabsDragging',
@@ -87,7 +91,8 @@ title-bar(
             )
 
         window-controls.background(
-            *ngIf='config.store.appearance.frame == "thin" && (hostApp.platform == Platform.Windows || hostApp.platform == Platform.Linux)',
+            *ngIf='config.store.appearance.frame == "thin" \
+            && (hostApp.platform == Platform.Windows || hostApp.platform == Platform.Linux)',
         )
 
     start-page(*ngIf='ready && app.tabs.length == 0')
