@@ -253,6 +253,123 @@
         "code",
         "plugin"
       ]
+    },
+    {
+      "login": "orin220444",
+      "name": "orin220444",
+      "avatar_url": "https://avatars3.githubusercontent.com/u/30747229?v=4",
+      "profile": "https://github.com/orin220444",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "Goobles",
+      "name": "Gobius Dolhain",
+      "avatar_url": "https://avatars3.githubusercontent.com/u/8776771?v=4",
+      "profile": "https://github.com/Goobles",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "3l0w",
+      "name": "Gwilherm Folliot",
+      "avatar_url": "https://avatars2.githubusercontent.com/u/37798980?v=4",
+      "profile": "https://github.com/3l0w",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "dimitory",
+      "name": "Dmitry Pronin",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/475955?v=4",
+      "profile": "https://github.com/Dimitory",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "JonathanBeverley",
+      "name": "Jonathan Beverley",
+      "avatar_url": "https://avatars1.githubusercontent.com/u/20328966?v=4",
+      "profile": "https://github.com/JonathanBeverley",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "zend",
+      "name": "Zenghai Liang",
+      "avatar_url": "https://avatars1.githubusercontent.com/u/25160?v=4",
+      "profile": "https://github.com/zend",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "matishadow",
+      "name": "Mateusz Tracz",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/9083085?v=4",
+      "profile": "https://about.me/matishadow",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "pinpins",
+      "name": "pinpin",
+      "avatar_url": "https://avatars3.githubusercontent.com/u/36234677?v=4",
+      "profile": "https://zergpool.com",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "TakuroOnoda",
+      "name": "Takuro Onoda",
+      "avatar_url": "https://avatars0.githubusercontent.com/u/1407926?v=4",
+      "profile": "https://github.com/TakuroOnoda",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "frauhottelmann",
+      "name": "frauhottelmann",
+      "avatar_url": "https://avatars2.githubusercontent.com/u/902705?v=4",
+      "profile": "https://github.com/frauhottelmann",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "VectorKappa",
+      "name": "Piotr Patalong",
+      "avatar_url": "https://avatars.githubusercontent.com/u/29167842?v=4",
+      "profile": "http://patalong.pl",
+      "contributions": [
+        "design"
+      ]
+    },
+    {
+      "login": "clarkwang",
+      "name": "Clark Wang",
+      "avatar_url": "https://avatars.githubusercontent.com/u/157076?v=4",
+      "profile": "https://github.com/clarkwang",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "iamchating",
+      "name": "iamchating",
+      "avatar_url": "https://avatars.githubusercontent.com/u/7088153?v=4",
+      "profile": "https://github.com/iamchating",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

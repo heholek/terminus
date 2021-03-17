@@ -1,4 +1,3 @@
-import slugify from 'slugify'
 import { Injectable } from '@angular/core'
 import { HotkeyDescription, HotkeyProvider } from 'terminus-core'
 import { TerminalService } from './services/terminal.service'
@@ -64,8 +63,16 @@ export class TerminalHotkeyProvider extends HotkeyProvider {
             name: 'Intelligent Ctrl-C (copy/abort)',
         },
         {
+            id: 'copy-current-path',
+            name: 'Copy current path',
+        },
+        {
             id: 'search',
             name: 'Search',
+        },
+        {
+            id: 'pane-focus-all',
+            name: 'Focus all panes at once',
         },
     ]
 
@@ -78,7 +85,7 @@ export class TerminalHotkeyProvider extends HotkeyProvider {
         return [
             ...this.hotkeys,
             ...profiles.map(profile => ({
-                id: `profile.${slugify(profile.name).toLowerCase()}`,
+                id: `profile.${this.terminal.getProfileID(profile)}`,
                 name: `New tab: ${profile.name}`,
             })),
         ]

@@ -7,12 +7,12 @@ import { SerialTabComponent } from './components/serialTab.component'
 @Injectable()
 export class RecoveryProvider extends TabRecoveryProvider {
     async recover (recoveryToken: RecoveryToken): Promise<RecoveredTab|null> {
-        if (recoveryToken?.type === 'app:serial-tab') {
+        if (recoveryToken.type === 'app:serial-tab') {
             return {
                 type: SerialTabComponent,
                 options: {
-                    connection: recoveryToken['connection'],
-                    savedState: recoveryToken['savedState'],
+                    connection: recoveryToken.connection,
+                    savedState: recoveryToken.savedState,
                 },
             }
         }

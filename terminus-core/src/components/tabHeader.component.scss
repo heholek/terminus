@@ -6,6 +6,12 @@ $tabs-height: 38px;
 
     flex: 1000 1 200px;
     width: 200px;
+    padding: 0 10px;
+
+    &.flex-width {
+        flex: 1000 1 auto;
+        width: auto;
+    }
 
     display: flex;
     flex-direction: row;
@@ -13,13 +19,17 @@ $tabs-height: 38px;
 
     overflow: hidden;
 
+    &.vertical {
+      flex: none;
+      height: $tabs-height;
+    }
+
     .index {
         flex: none;
         font-weight: bold;
         -webkit-app-region: no-drag;
         cursor: -webkit-grab;
 
-        margin-left: 10px;
         width: 22px;
         border-radius: 10px;
         text-align: center;
@@ -29,12 +39,16 @@ $tabs-height: 38px;
 
     .name {
         flex: auto;
-        margin: 0 1px 0 10px;
+        margin-top: 1px;
         overflow: hidden;
         white-space: nowrap;
         text-overflow: ellipsis;
         min-width: 0;
         align-self: center;
+    }
+
+    .index + .name {
+        margin-left: 10px;
     }
 
     button {
@@ -44,13 +58,15 @@ $tabs-height: 38px;
         opacity: 0;
         -webkit-app-region: no-drag;
 
+        position: absolute;
+        right: 0;
+
         $button-size: 26px;
         width: $button-size;
         height: $button-size;
         border-radius: $button-size / 2;
         line-height: $button-size;
         align-self: center;
-        margin-right: 10px;
 
         text-align: center;
         font-size: 20px;
@@ -58,6 +74,13 @@ $tabs-height: 38px;
         &:focus {
           outline: 0;
         }
+    }
+
+    &:hover .name {
+        -webkit-mask-image: linear-gradient(black 0 0), linear-gradient(to left, transparent 0%, black 100%);
+        -webkit-mask-size: calc(100% - 60px) auto, 60px auto;
+        -webkit-mask-repeat: no-repeat;
+        -webkit-mask-position: left, right;
     }
 
     &:hover button {

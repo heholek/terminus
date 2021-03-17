@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/explicit-module-boundary-types */
+import type { MenuItemConstructorOptions } from 'electron'
 import { Component, Input, Optional, Inject, HostBinding, HostListener, ViewChild, ElementRef } from '@angular/core'
 import { SortableComponent } from 'ng2-dnd'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
@@ -9,10 +10,11 @@ import { HotkeysService } from '../services/hotkeys.service'
 import { ElectronService } from '../services/electron.service'
 import { AppService } from '../services/app.service'
 import { HostAppService, Platform } from '../services/hostApp.service'
+import { ConfigService } from '../services/config.service'
 
 /** @hidden */
 export interface SortableComponentProxy {
-    setDragHandle (_: HTMLElement)
+    setDragHandle: (_: HTMLElement) => void
 }
 
 /** @hidden */
@@ -27,10 +29,11 @@ export class TabHeaderComponent {
     @Input() @HostBinding('class.has-activity') hasActivity: boolean
     @Input() tab: BaseTabComponent
     @Input() progress: number|null
-    @ViewChild('handle') handle: ElementRef
+    @ViewChild('handle') handle?: ElementRef
 
     private constructor (
         public app: AppService,
+        public config: ConfigService,
         private electron: ElectronService,
         private hostApp: HostAppService,
         private ngbModal: NgbModal,
@@ -55,7 +58,7 @@ export class TabHeaderComponent {
     }
 
     ngAfterViewInit () {
-        if (this.hostApp.platform === Platform.macOS) {
+        if (this.handle && this.hostApp.platform === Platform.macOS) {
             this.parentDraggable.setDragHandle(this.handle.nativeElement)
         }
     }
@@ -69,13 +72,17 @@ export class TabHeaderComponent {
         }).catch(() => null)
     }
 
-    async buildContextMenu (): Promise<Electron.MenuItemConstructorOptions[]> {
-        let items: Electron.MenuItemConstructorOptions[] = []
+    async buildContextMenu (): Promise<MenuItemConstructorOptions[]> {
+        let items: MenuItemConstructorOptions[] = []
         for (const section of await Promise.all(this.contextMenuProviders.map(x => x.getItems(this.tab, this)))) {
             items.push({ type: 'separator' })
             items = items.concat(section)
         }
         return items.slice(1)
+    }
+
+    @HostBinding('class.flex-width') get isFlexWidthEnabled (): boolean {
+        return this.config.store.appearance.flexTabs
     }
 
     @HostListener('dblclick') onDoubleClick (): void {

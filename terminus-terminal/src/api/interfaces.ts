@@ -6,9 +6,9 @@ export interface ResizeEvent {
 export interface SessionOptions {
     name?: string
     command: string
-    args: string[]
+    args?: string[]
     cwd?: string
-    env?: {[id: string]: string}
+    env?: Record<string, string>
     width?: number
     height?: number
     pauseAfterExit?: boolean
@@ -19,8 +19,10 @@ export interface Profile {
     name: string
     color?: string
     sessionOptions: SessionOptions
+    shell?: string
     isBuiltin?: boolean
     icon?: string
+    disableDynamicTitle?: boolean
 }
 
 export interface TerminalColorScheme {
@@ -36,7 +38,7 @@ export interface Shell {
     name?: string
     command: string
     args?: string[]
-    env: {[id: string]: string}
+    env: Record<string, string>
 
     /**
      * Base path to which shell's internal FS is relative

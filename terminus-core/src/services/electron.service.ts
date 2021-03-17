@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core'
-import { TouchBar, BrowserWindow, Menu, MenuItem, NativeImage } from 'electron'
+import { App, IpcRenderer, Shell, Dialog, Clipboard, GlobalShortcut, Screen, Remote, AutoUpdater, TouchBar, BrowserWindow, Menu, MenuItem, NativeImage, MessageBoxOptions } from 'electron'
 
 export interface MessageBoxResponse {
     response: number
@@ -8,16 +8,16 @@ export interface MessageBoxResponse {
 
 @Injectable({ providedIn: 'root' })
 export class ElectronService {
-    app: Electron.App
-    ipcRenderer: Electron.IpcRenderer
-    shell: Electron.Shell
-    dialog: Electron.Dialog
-    clipboard: Electron.Clipboard
-    globalShortcut: Electron.GlobalShortcut
+    app: App
+    ipcRenderer: IpcRenderer
+    shell: Shell
+    dialog: Dialog
+    clipboard: Clipboard
+    globalShortcut: GlobalShortcut
     nativeImage: typeof NativeImage
-    screen: Electron.Screen
-    remote: Electron.Remote
-    autoUpdater: Electron.AutoUpdater
+    screen: Screen
+    remote: Remote
+    autoUpdater: AutoUpdater
     TouchBar: typeof TouchBar
     BrowserWindow: typeof BrowserWindow
     Menu: typeof Menu
@@ -25,7 +25,7 @@ export class ElectronService {
     private electron: any
 
     /** @hidden */
-    constructor () {
+    private constructor () {
         this.electron = require('electron')
         this.remote = this.electron.remote
         this.app = this.remote.app
@@ -43,18 +43,9 @@ export class ElectronService {
         this.MenuItem = this.remote.MenuItem
     }
 
-    /**
-     * Removes OS focus from Terminus' window
-     */
-    loseFocus (): void {
-        if (process.platform === 'darwin') {
-            this.remote.Menu.sendActionToFirstResponder('hide:')
-        }
-    }
-
     async showMessageBox (
-        browserWindow: Electron.BrowserWindow,
-        options: Electron.MessageBoxOptions
+        browserWindow: BrowserWindow,
+        options: MessageBoxOptions
     ): Promise<MessageBoxResponse> {
         return this.dialog.showMessageBox(browserWindow, options)
     }

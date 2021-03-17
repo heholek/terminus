@@ -15,6 +15,22 @@ export class EditConnectionModalComponent {
     connection: SerialConnection
     foundPorts: SerialPortInfo[]
     baudRates = BAUD_RATES
+    inputModes = [
+        { key: null, name: 'Normal', description: 'Input is sent as you type' },
+        { key: 'readline', name: 'Line by line', description: 'Line editor, input is sent after you press Enter' },
+        { key: 'readline-hex', name: 'Hexadecimal', description: 'Send bytes by typing in hex values' },
+    ]
+    outputModes = [
+        { key: null, name: 'Normal', description: 'Output is shown as it is received' },
+        { key: 'hex', name: 'Hexadecimal', description: 'Output is shown as a hexdump' },
+    ]
+    newlineModes = [
+        { key: null, name: 'Keep' },
+        { key: 'strip', name: 'Strip' },
+        { key: 'cr', name: 'Force CR' },
+        { key: 'lf', name: 'Force LF' },
+        { key: 'crlf', name: 'Force CRLF' },
+    ]
 
     constructor (
         private modalInstance: NgbActiveModal,
@@ -22,6 +38,14 @@ export class EditConnectionModalComponent {
         private hostApp: HostAppService,
         private serial: SerialService,
     ) {
+    }
+
+    getInputModeName (key) {
+        return this.inputModes.find(x => x.key === key)?.name
+    }
+
+    getOutputModeName (key) {
+        return this.outputModes.find(x => x.key === key)?.name
     }
 
     portsAutocomplete = text$ => text$.pipe(map(() => {
@@ -37,7 +61,7 @@ export class EditConnectionModalComponent {
     }
 
     async ngOnInit () {
-        this.connection.scripts = this.connection.scripts || []
+        this.connection.scripts = this.connection.scripts ?? []
         this.foundPorts = await this.serial.listPorts()
     }
 

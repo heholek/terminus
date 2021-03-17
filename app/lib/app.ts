@@ -1,16 +1,33 @@
-import { app, ipcMain, Menu, Tray, shell } from 'electron'
-// eslint-disable-next-line no-duplicate-imports
-import * as electron from 'electron'
+import { app, ipcMain, Menu, Tray, shell, screen, globalShortcut, MenuItemConstructorOptions } from 'electron'
+import * as promiseIpc from 'electron-promise-ipc'
 import { loadConfig } from './config'
 import { Window, WindowOptions } from './window'
+import { pluginManager } from './pluginManager'
 
 export class Application {
-    private tray: Tray
+    private tray?: Tray
     private windows: Window[] = []
 
     constructor () {
-        ipcMain.on('app:config-change', () => {
-            this.broadcast('host:config-change')
+        ipcMain.on('app:config-change', (_event, config) => {
+            this.broadcast('host:config-change', config)
+        })
+
+        ipcMain.on('app:register-global-hotkey', (_event, specs) => {
+            globalShortcut.unregisterAll()
+            for (const spec of specs) {
+                globalShortcut.register(spec, () => {
+                    this.onGlobalHotkey()
+                })
+            }
+        })
+
+        ;(promiseIpc as any).on('plugin-manager:install', (path, name, version) => {
+            return pluginManager.install(path, name, version)
+        })
+
+        ;(promiseIpc as any).on('plugin-manager:uninstall', (path, name) => {
+            return pluginManager.uninstall(path, name)
         })
 
         const configData = loadConfig()
@@ -32,11 +49,13 @@ export class Application {
     }
 
     init (): void {
-        electron.screen.on('display-metrics-changed', () => this.broadcast('host:display-metrics-changed'))
+        screen.on('display-metrics-changed', () => this.broadcast('host:display-metrics-changed'))
+        screen.on('display-added', () => this.broadcast('host:displays-changed'))
+        screen.on('display-removed', () => this.broadcast('host:displays-changed'))
     }
 
     async newWindow (options?: WindowOptions): Promise<Window> {
-        let window = new Window(options)
+        const window = new Window(options)
         this.windows.push(window)
         window.visible$.subscribe(visible => {
             if (visible) {
@@ -45,6 +64,9 @@ export class Application {
                 this.enableTray()
             }
         })
+        window.closed$.subscribe(() => {
+            this.windows = this.windows.filter(x => x !== window)
+        })
         if (process.platform === 'darwin') {
             this.setupMenu()
         }
@@ -52,13 +74,31 @@ export class Application {
         return window
     }
 
-    broadcast (event: string, ...args): void {
+    onGlobalHotkey (): void {
+        if (this.windows.some(x => x.isFocused() && x.isVisible())) {
+            for (const window of this.windows) {
+                window.hide()
+            }
+        } else {
+            for (const window of this.windows) {
+                window.present()
+            }
+        }
+    }
+
+    presentAllWindows (): void {
+        for (const window of this.windows) {
+            window.present()
+        }
+    }
+
+    broadcast (event: string, ...args: any[]): void {
         for (const window of this.windows) {
             window.send(event, ...args)
         }
     }
 
-    async send (event: string, ...args): Promise<void> {
+    async send (event: string, ...args: any[]): Promise<void> {
         if (!this.hasWindows()) {
             await this.newWindow()
         }
@@ -91,10 +131,8 @@ export class Application {
     }
 
     disableTray (): void {
-        if (this.tray) {
-            this.tray.destroy()
-            this.tray = null
-        }
+        this.tray?.destroy()
+        this.tray = null
     }
 
     hasWindows (): boolean {
@@ -102,13 +140,18 @@ export class Application {
     }
 
     focus (): void {
-        for (let window of this.windows) {
+        for (const window of this.windows) {
             window.show()
         }
     }
 
+    handleSecondInstance (argv: string[], cwd: string): void {
+        this.presentAllWindows()
+        this.windows[this.windows.length - 1].passCliArguments(argv, cwd, true)
+    }
+
     private setupMenu () {
-        let template: Electron.MenuItemConstructorOptions[] = [
+        const template: MenuItemConstructorOptions[] = [
             {
                 label: 'Application',
                 submenu: [
